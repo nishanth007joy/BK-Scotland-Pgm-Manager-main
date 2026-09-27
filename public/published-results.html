@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Published results | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <style>
+    #publishedResults > tr > td { padding-top: 1rem; padding-bottom: 1rem; }
+    #publishedResults > tr + tr > td { border-top: 2px solid var(--bs-border-color, #dee2e6); }
+    #printConfirmation::backdrop { background: rgb(0 0 0 / 45%); }
+    .print-heading, .print-footer, #publicPrintResults { display: none; }
+    @page { size: landscape; margin: 10mm; }
+    @media print {
+      body { background: white !important; color: black !important; }
+      body > :not(#panel), #panel > :not(#resultsCard), .print-controls, #listStatus { display: none !important; }
+      #panel { max-width: none; width: 100%; margin: 0; padding: 0 !important; }
+      #resultsCard { display: block; border: 0 !important; box-shadow: none !important; }
+      #resultsCard .card-body { padding: 0 !important; }
+      .print-heading { display: block; margin-bottom: 5mm; }
+      .print-heading h2 { font-size: 16pt; }
+      .print-heading p { margin-bottom: 2mm; }
+      .print-footer { display: block; margin-top: 15mm; break-inside: avoid; font-size: 11pt; }
+      .signature-line { display: inline-block; width: 75mm; margin-left: 4mm; border-bottom: 1px solid black; }
+      .table-responsive { overflow: visible !important; }
+      table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+      th, td { padding: 2mm !important; overflow-wrap: anywhere; color: black !important; border-bottom: 1px solid #999 !important; }
+      #resultsCard tr > :nth-child(3),
+      #resultsCard tr > :nth-child(4),
+      #resultsCard tr > :nth-child(5),
+      #resultsCard tr > :nth-child(13), #resultsCard tr > :nth-child(14) { display: none !important; }
+      caption { display: none; }
+      body.public-results-print #resultsCard .card-body > :not(#publicPrintResults) { display: none !important; }
+      body.public-results-print #publicPrintResults { display: block; }
+      #publicPrintResults .public-result-group + .public-result-group { break-before: page; page-break-before: always; }
+      #publicPrintResults h2 { font-size: 20pt; margin-bottom: 8mm; }
+      #publicPrintResults h3 { font-size: 16pt; margin-bottom: 6mm; }
+      #publicPrintResults table { font-size: 13pt; }
+      body.public-results-print #publicPrintResults tr > th, body.public-results-print #publicPrintResults tr > td { display: table-cell !important; padding: 4mm 2mm !important; }
+    }
+  </style>
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="panel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div><h1 class="h3 mb-1">Published results</h1><p class="text-secondary mb-0">Browse published places, scores, and points</p><a href="/unprinted-certificates.html">Events with certificates not printed</a><a class="d-block mb-2" href="/unprinted-results.html">Results not printed</a></div>
+      <div class="text-end"><a class="small me-2" href="/home.html">Home</a><span id="signedInAs" class="small text-secondary d-block"></span><button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <section class="card shadow-sm border-0 mb-4"><div class="card-body p-4">
+      <div class="row g-3 align-items-end">
+        <div class="col-md-5"><label class="form-label" for="event">Event name</label><select class="form-select" id="event" disabled><option value="">All events</option></select></div>
+        <div class="col-md-5"><label class="form-label" for="ageGroup">Age group</label><select class="form-select" id="ageGroup" disabled><option value="">All age groups</option></select></div>
+        <div class="col-md-2"><button class="btn btn-outline-primary" id="reload" type="button" disabled>Refresh</button></div>
+      </div>
+      <div id="message" class="alert alert-danger mt-3 mb-0 d-none" role="alert"></div>
+    </div></section>
+    <section id="resultsCard" class="card shadow-sm border-0"><div class="card-body p-4">
+      <div class="print-heading">
+        <h2>Bible Kalothsavam - Scotland 2026: Published results</h2>
+        <p id="printSelection"></p>
+        <p id="printDateTime"></p>
+      </div>
+      <p class="text-secondary print-controls">Select an event and age group to save a certificate Excel file in Desktop/Certificates on the computer running the app. Certificates are marked as printed after the file is saved. The button is disabled when all certificates in the selection are printed.</p>
+      <div class="print-controls mb-3 d-flex gap-2 flex-wrap">
+        <button class="btn btn-primary" id="printCertificate" type="button" disabled>Print Certificate</button>
+        <button class="btn btn-outline-primary" id="printEventResults" type="button" disabled>Print event results</button>
+        <button class="btn btn-outline-primary" id="printPublicResults" type="button" disabled>Print results (public format)</button>
+      </div>
+      <p id="listStatus" role="status">Loading published results...</p>
+      <div class="table-responsive"><table class="table align-middle">
+        <caption>Published results ordered by event, age group, and place</caption>
+        <thead><tr><th scope="col">Event name</th><th scope="col">Age group</th><th scope="col">Event ID</th><th scope="col">Type</th><th scope="col">Stage</th><th scope="col">Place</th><th scope="col">First name</th><th scope="col">Last name</th><th scope="col">Mission</th><th scope="col">Chest no.</th><th scope="col">Score</th><th scope="col">Points</th><th scope="col">Certificate printed</th><th scope="col">Results printed</th></tr></thead>
+        <tbody id="publishedResults"></tbody>
+      </table></div>
+      <footer class="print-footer">Signed and approved by:<span class="signature-line" aria-label="Signature">&nbsp;</span></footer>
+      <div id="publicPrintResults"></div>
+    </div></section>
+  </main>
+  <main id="accessDenied" class="container py-5"><h1 class="h4">Sign-in required</h1><p id="accessMessage">Checking your session...</p></main>
+  <dialog id="printConfirmation" class="border-0 rounded shadow p-4" aria-labelledby="printConfirmationTitle" aria-describedby="printConfirmationDescription">
+    <form method="dialog">
+      <h2 id="printConfirmationTitle" class="h5">Did the event results print successfully?</h2>
+      <p id="printConfirmationDescription">Select Yes to mark these results as printed.</p>
+      <div class="d-flex justify-content-end gap-2">
+        <button class="btn btn-outline-secondary" value="no" autofocus>No</button>
+        <button class="btn btn-primary" value="yes">Yes</button>
+      </div>
+    </form>
+  </dialog>
+  <script src="/logout.js"></script>
+  <script src="/published-results.js"></script>
+</body>
+</html>

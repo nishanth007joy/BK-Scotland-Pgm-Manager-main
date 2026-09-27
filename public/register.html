@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Create account | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="registrationPanel" class="container d-none align-items-center min-vh-100 py-4">
+    <section class="card shadow-sm border-0 mx-auto" style="max-width: 28rem; width: 100%;">
+      <div class="card-body p-4 p-md-5">
+        <div class="text-end"><button class="btn btn-sm btn-outline-secondary" type="button" data-logout>Logout</button></div>
+        <h1 class="h3 text-center mb-2">Create account</h1>
+        <p class="text-secondary text-center mb-4">Bible Kalothsavam - Scotland 2026</p>
+        <form id="registerForm" novalidate>
+          <div class="mb-3">
+            <label class="form-label" for="name">Name</label>
+            <input class="form-control form-control-lg" id="name" autocomplete="name" required autofocus>
+          </div>
+          <div class="mb-3">
+            <label class="form-label" for="email">Email address</label>
+            <input class="form-control form-control-lg" id="email" type="email" autocomplete="email" required>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control form-control-lg" id="password" type="password" minlength="8" autocomplete="new-password" required>
+            <div class="form-text">Use at least 8 characters.</div>
+          </div>
+          <div class="mb-4">
+            <label class="form-label" for="role">User role</label>
+            <select class="form-select form-select-lg" id="role" required aria-describedby="roleHelp">
+              <option value="data-entry" selected>Data entry</option>
+              <option value="admin">Admin</option>
+              <option value="resultboard">Results board (display only)</option>
+            </select>
+            <div id="roleHelp" class="form-text">Admins can create users and edit published results. Data entry users can enter data and unpublished results. Results board users can only view the scrolling results page. The name resultboard always receives display-only access.</div>
+          </div>
+          <button class="btn btn-primary btn-lg w-100" type="submit">Create account</button>
+        </form>
+        <div id="message" class="alert mt-4 mb-0 d-none" role="alert"></div>
+        <p class="small text-center text-secondary mt-4 mb-0"><a href="/">Back to sign in</a></p>
+      </div>
+    </section>
+  </main>
+  <main id="accessDenied" class="container d-flex align-items-center min-vh-100 py-4">
+    <section class="card shadow-sm border-0 mx-auto" style="max-width: 28rem; width: 100%;">
+      <div class="card-body p-4 p-md-5 text-center">
+        <h1 class="h3">Administrator access required</h1>
+        <p id="accessMessage" class="text-secondary mb-0">Checking access…</p>
+      </div>
+    </section>
+  </main>
+  <script src="/logout.js"></script>
+  <script>
+    function showMessage(text, type) {
+      const message = document.getElementById('message');
+      message.textContent = text;
+      message.className = `alert mt-4 mb-0 alert-${type}`;
+    }
+
+    async function verifyAdminAccess() {
+      const denied = document.getElementById('accessDenied');
+      const message = document.getElementById('accessMessage');
+      try {
+        const response = await fetch('/api/admin/registration-access', { method: 'POST' });
+        if (!response.ok) {
+          message.textContent = 'Sign in with the administrator account to create users.';
+          return;
+        }
+        denied.classList.replace('d-flex', 'd-none');
+        const panel = document.getElementById('registrationPanel');
+        panel.classList.replace('d-none', 'd-flex');
+      } catch (error) {
+        message.textContent = 'Unable to verify administrator access.';
+      }
+    }
+
+    document.getElementById('registerForm').addEventListener('submit', async function (event) {
+      event.preventDefault();
+      const name = document.getElementById('name').value.trim();
+      const email = document.getElementById('email').value.trim();
+      const password = document.getElementById('password').value;
+      const role = document.getElementById('role').value;
+      const button = event.currentTarget.querySelector('button[type="submit"]');
+
+      if (!name || !email || password.length < 8) {
+        showMessage('Enter your name and email, plus a password of at least 8 characters.', 'danger');
+        return;
+      }
+
+      button.disabled = true;
+      button.textContent = 'Creating account…';
+      try {
+        const response = await fetch('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, role })
+        });
+        const result = await response.json();
+        showMessage(result.message || 'An unexpected response was received.', response.ok ? 'success' : 'danger');
+        if (response.ok) setTimeout(() => window.location.assign('/'), 1000);
+      } catch (error) {
+        showMessage('Unable to contact the server. Open this page at http://localhost:3000.', 'danger');
+      } finally {
+        button.disabled = false;
+        button.textContent = 'Create account';
+      }
+    });
+
+    verifyAdminAccess();
+  </script>
+</body>
+</html>

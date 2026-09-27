@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Contestant entry | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="entryPanel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div><h1 class="h3 mb-1">Contestant data entry</h1><p class="text-secondary mb-0">Bible Kalothsavam - Scotland 2026</p></div>
+      <div class="text-end"><a class="small me-3" href="/group-contestant-list.html">List group contestants</a><a class="small me-2" href="/home.html">Home</a><span id="signedInAs" class="small text-secondary d-block"></span><a id="adminLink" class="small d-none" href="/register.html">Create user</a><button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <section class="card shadow-sm border-0"><div class="card-body p-4">
+      <form id="contestantForm" novalidate>
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label" for="id">Contestant ID</label><input class="form-control" id="id" placeholder="Assigned automatically on save" readonly></div>
+          <div class="col-md-4"><label class="form-label" for="firstName">First name</label><input class="form-control" id="firstName" autocomplete="off" aria-describedby="firstNameHelp" maxlength="50" required autofocus><div id="existingFirstNames" class="list-group mt-1" aria-label="Matching contestants" style="max-height: 15rem; overflow-y: auto" hidden></div><div id="firstNameHelp" class="form-text">Type to see matching first and last names and any on-stage and off-stage chest numbers. Select a name to fill both name fields, or enter a new name.</div></div>
+          <div class="col-md-4"><label class="form-label" for="lastName">Last name</label><input class="form-control" id="lastName" maxlength="50" required></div>
+          <div class="col-md-4"><label class="form-label" for="ageGroup">Age range</label><select class="form-select" id="ageGroup" required disabled><option value="">Loading age ranges…</option></select></div>
+          <div class="col-md-4"><label class="form-label" for="mission">Mission</label><select class="form-select" id="mission" required disabled><option value="">Loading missions…</option></select></div>
+          <div class="col-md-4"><label class="form-label" for="region">Region</label><input class="form-control" id="region" maxlength="50" required></div>
+          <div class="col-12 form-check ms-2"><input class="form-check-input" type="checkbox" id="isGroupContestant"><label class="form-check-label" for="isGroupContestant">Group contestant</label><div class="form-text">Disables chest-number entry. Any existing individual chest numbers are kept. When unchecked, at least one on-stage or off-stage chest number is required.</div></div>
+          <div class="col-md-4"><label class="form-label" for="onStageChestNo">On-stage chest no.</label><input class="form-control" id="onStageChestNo" maxlength="10"></div>
+          <div class="col-md-4"><label class="form-label" for="offStageChestNo">Off-stage chest no.</label><input class="form-control" id="offStageChestNo" maxlength="10"></div>
+          <div class="col-md-4"><label class="form-label" for="comments">Comments</label><input class="form-control" id="comments" maxlength="50"></div>
+        </div>
+        <button class="btn btn-primary mt-4" type="submit">Save contestant</button>
+        <div id="message" class="alert mt-3 mb-0 d-none" role="alert"></div>
+      </form>
+    </div></section>
+  </main>
+  <main id="accessDenied" class="container d-flex align-items-center min-vh-100 py-4"><div class="card shadow-sm border-0 mx-auto" style="max-width:28rem;width:100%"><div class="card-body p-4 text-center"><h1 class="h4">Sign-in required</h1><p id="accessMessage" class="text-secondary mb-0">Checking your session…</p></div></div></main>
+  <script src="/logout.js"></script>
+  <script>
+    const fields = ['firstName', 'lastName', 'ageGroup', 'mission', 'region', 'onStageChestNo', 'offStageChestNo', 'comments'];
+    function updateChestNumberFields() {
+      const isGroup = document.getElementById('isGroupContestant').checked;
+      for (const id of ['onStageChestNo', 'offStageChestNo']) {
+        const input = document.getElementById(id);
+        input.disabled = isGroup;
+      }
+    }
+    document.getElementById('isGroupContestant').addEventListener('change', updateChestNumberFields);
+    function showMessage(text, type) { const message = document.getElementById('message'); message.textContent = text; message.className = `alert mt-3 mb-0 alert-${type}`; }
+    const existingFirstNames = new Map();
+    function addFirstNameSuggestions(names) {
+      for (const contestant of names) {
+        const firstName = String(contestant.FirstName || '').trim();
+        const lastName = String(contestant.LastName || '').trim();
+        const onStageChestNo = String(contestant.OnStageChestNo ?? '').trim();
+        const offStageChestNo = String(contestant.OffStageChestNo ?? '').trim();
+        const key = contestant.ContestantID ?? JSON.stringify([firstName.toLocaleLowerCase(), lastName.toLocaleLowerCase(), onStageChestNo, offStageChestNo]);
+        if (firstName) existingFirstNames.set(key, { firstName, lastName, onStageChestNo, offStageChestNo });
+      }
+      renderNameSuggestions();
+    }
+    function renderNameSuggestions() {
+      const query = document.getElementById('firstName').value.trim().toLocaleLowerCase();
+      const list = document.getElementById('existingFirstNames');
+      list.replaceChildren();
+      if (query) {
+        const matches = Array.from(existingFirstNames.values())
+          .filter(name => name.firstName.toLocaleLowerCase().includes(query))
+          .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`));
+        for (const name of matches) {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'list-group-item list-group-item-action';
+          const label = [`${name.firstName} ${name.lastName}`.trim()];
+          if (name.onStageChestNo) label.push(`On-stage: ${name.onStageChestNo}`);
+          if (name.offStageChestNo) label.push(`Off-stage: ${name.offStageChestNo}`);
+          button.textContent = label.join(' | ');
+          button.addEventListener('click', () => {
+            document.getElementById('firstName').value = name.firstName;
+            document.getElementById('lastName').value = name.lastName;
+            list.hidden = true;
+            document.getElementById('lastName').focus();
+          });
+          list.append(button);
+        }
+      }
+      list.hidden = list.children.length === 0;
+    }
+    document.getElementById('firstName').addEventListener('input', renderNameSuggestions);
+    document.getElementById('firstName').addEventListener('keydown', event => {
+      if (event.key === 'Escape') document.getElementById('existingFirstNames').hidden = true;
+    });
+    async function loadFirstNameSuggestions() {
+      try {
+        const response = await fetch('/api/contestants');
+        if (!response.ok) throw new Error('Unable to load existing names.');
+        const result = await response.json();
+        addFirstNameSuggestions(result.contestants);
+      } catch (error) {
+        document.getElementById('firstNameHelp').textContent = 'Existing name suggestions are unavailable. You can still enter a name.';
+      }
+    }
+    async function loadMissions() {
+      const select = document.getElementById('mission');
+      const response = await fetch('/api/missions', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Unable to load missions.');
+      select.replaceChildren(new Option('Select a mission', ''));
+      result.missions.forEach((mission) => {
+        const option = new Option(mission.name, mission.name);
+        option.dataset.region = mission.region ?? '';
+        select.add(option);
+      });
+      select.disabled = false;
+    }
+    document.getElementById('mission').addEventListener('change', (event) => {
+      document.getElementById('region').value = event.target.selectedOptions[0]?.dataset.region ?? '';
+    });
+    async function loadAgeCategories() {
+      const select = document.getElementById('ageGroup');
+      const response = await fetch('/api/age-categories', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Unable to load age ranges.');
+      select.replaceChildren(new Option('Select an age range', ''));
+      result.ageCategories.forEach((category) => select.add(new Option(category.name, category.name)));
+      select.disabled = false;
+    }
+    async function verifySession() {
+      const response = await fetch('/api/session', { method: 'POST' });
+      if (!response.ok) { document.getElementById('accessMessage').innerHTML = 'Please <a href="/">sign in</a> to enter contestants.'; return; }
+      const session = await response.json();
+      document.getElementById('signedInAs').textContent = `Signed in as ${session.name}`;
+      if (session.isAdmin) document.getElementById('adminLink').classList.remove('d-none');
+      document.getElementById('accessDenied').classList.replace('d-flex', 'd-none');
+      document.getElementById('entryPanel').classList.replace('d-none', 'd-block');
+      try { await Promise.all([loadMissions(), loadAgeCategories(), loadFirstNameSuggestions()]); }
+      catch (error) { showMessage(error.message, 'danger'); }
+    }
+    document.getElementById('contestantForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = Object.fromEntries(fields.map((field) => [field, document.getElementById(field).value]));
+      data.isGroupContestant = document.getElementById('isGroupContestant').checked;
+      if (['firstName', 'lastName', 'ageGroup', 'mission', 'region'].some((field) => !data[field].trim())) { showMessage('Complete all required fields.', 'danger'); return; }
+      if (!data.isGroupContestant && !data.onStageChestNo.trim() && !data.offStageChestNo.trim()) {
+        showMessage('Enter at least one on-stage or off-stage chest number when Group contestant is not selected.', 'danger');
+        document.getElementById('onStageChestNo').focus();
+        return;
+      }
+      const button = form.querySelector('button[type="submit"]'); button.disabled = true; button.textContent = 'Saving…';
+      try {
+        const response = await fetch('/api/contestants', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const body = await response.text();
+        let result = {};
+        try { result = body ? JSON.parse(body) : {}; } catch (error) { console.warn('Non-JSON save response:', body); }
+        if (response.ok) {
+          const savedAt = result.createdAt ? ` Recorded at ${new Date(result.createdAt).toLocaleString('en-GB', { timeZone: 'Europe/London', timeZoneName: 'short' })}.` : '';
+          showMessage((result.message || 'Contestant saved.') + savedAt, 'success');
+          await loadFirstNameSuggestions();
+          form.reset();
+          renderNameSuggestions();
+          updateChestNumberFields();
+          document.getElementById('firstName').focus();
+        } else {
+          showMessage(result.message || `Save failed (HTTP ${response.status}).`, 'danger');
+        }
+      } catch (error) { console.error('Contestant save request failed:', error); showMessage('Unable to contact the server.', 'danger'); }
+      finally { button.disabled = false; button.textContent = 'Save contestant'; }
+    });
+    verifySession().catch(() => { document.getElementById('accessMessage').textContent = 'Unable to verify your session.'; });
+  </script>
+</body>
+</html>

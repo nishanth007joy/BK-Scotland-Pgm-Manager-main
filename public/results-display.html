@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Results display | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <style>
+    #panel { height: 100vh; height: 100dvh; display: flex; flex-direction: column; }
+    .display-header { flex-shrink: 0; max-height: 45dvh; overflow-y: auto; }
+    #resultsViewport { flex: 1; min-height: 0; overflow-y: auto; overflow-anchor: none; scroll-behavior: auto; }
+    #resultGroups { width: 100%; max-width: 2400px; margin: auto; }
+    .result-group { margin-bottom: 2rem; }
+    .table { font-size: clamp(1rem, 1.5vw, 2.5rem); }
+    #resultGroups h2 { font-size: clamp(1.5rem, 2vw, 3.5rem); }
+    #resultGroups h3 { font-size: clamp(1.2rem, 1.7vw, 3rem); }
+    .mobile-label { display: none; }
+    th, td { overflow-wrap: anywhere; }
+    .display-header .btn { min-height: 44px; }
+    @media (max-width: 767.98px) {
+      .display-header h1 { font-size: 1.2rem; }
+      .display-header #listStatus { font-size: .875rem; }
+      .result-group { margin-bottom: 1rem; }
+      .table-responsive { overflow: visible; }
+      .table, .table tbody { display: block; width: 100%; }
+      .table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+      .table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); border: 1px solid var(--bs-border-color); border-radius: .5rem; overflow: hidden; margin-bottom: .75rem; }
+      .table tbody tr:last-child { margin-bottom: 0; }
+      .table td { display: block; min-width: 0; padding: .65rem; border: 0; }
+      .table td:nth-child(1) { grid-column: 1 / -1; background: var(--bs-primary-bg-subtle); font-weight: 700; }
+      .table td:nth-child(2), .table td:nth-child(3) { grid-column: 1 / -1; }
+      .table td:nth-child(2) { font-size: 1.15rem; font-weight: 600; }
+      .mobile-label { display: block; font-size: .75rem; font-weight: 600; color: var(--bs-secondary-color); margin-bottom: .15rem; }
+    }
+  </style>
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="panel" class="d-none">
+    <header class="display-header bg-white border-bottom p-3">
+      <div class="d-flex justify-content-between align-items-center gap-3 flex-wrap">
+        <div><h1 class="h3 mb-1">Published results display</h1><p id="listStatus" class="text-secondary mb-0" role="status">Loading published results...</p></div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+          <a id="homeLink" href="/home.html" class="btn btn-outline-secondary d-none">Home</a>
+          <button id="toggleScroll" class="btn btn-primary" type="button" aria-pressed="true">Pause scrolling</button>
+          <button id="reload" class="btn btn-outline-primary" type="button">Refresh</button>
+          <button class="btn btn-outline-secondary" type="button" data-logout>Logout</button>
+        </div>
+      </div>
+      <p id="message" class="text-danger mb-0 mt-2 d-none" role="alert"></p>
+    </header>
+    <div id="resultsViewport" class="p-3 p-md-4" tabindex="0" role="region" aria-label="Published results grouped by event and age group">
+      <div id="resultGroups"></div>
+    </div>
+  </main>
+  <main id="accessDenied" class="container py-5"><h1 class="h4">Sign-in required</h1><p id="accessMessage">Checking your session...</p></main>
+  <script src="/logout.js"></script>
+  <script src="/results-display.js"></script>
+</body>
+</html>

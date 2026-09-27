@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Single Event Registrations | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="entryPanel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div><h1 class="h3 mb-1">Single Event Registrations</h1><p class="text-secondary mb-0">Bible Kalothsavam - Scotland 2026</p></div>
+      <div class="text-end"><a class="me-3" href="/edit-event-registration.html">Edit Single Event Registrations</a><a class="small me-3" href="/group-contestants.html">Group Event Registrations</a><a class="small me-2" href="/home.html">Home</a><span id="signedInAs" class="small text-secondary d-block"></span><a id="adminLink" class="small d-none" href="/register.html">Create user</a><button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <section class="card shadow-sm border-0"><div class="card-body p-4">
+      <form id="registrationForm" novalidate>
+<p class="text-secondary">Choose an event and contestant. Their details and the appropriate chest number are filled in automatically.</p><div class="row g-3"><div class="col-md-4"><label class="form-label" for="eventFilter">Event</label><div class="position-relative"><input class="form-control" type="search" id="eventFilter" placeholder="Type event name, ID, or age group" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="eventResults" aria-describedby="eventCount" required disabled><input type="hidden" id="EventID"><div id="eventResults" role="listbox" aria-label="Matching events" class="list-group position-absolute w-100 shadow bg-white" style="z-index:1000;max-height:18rem;overflow-y:auto" hidden></div></div><div id="eventCount" class="form-text" role="status">Type to find an event, then choose a match.</div></div>
+<div class="col-md-4"><label class="form-label" for="EventName">Event name</label><input class="form-control" id="EventName" readonly></div>
+<div class="col-md-4"><label class="form-label" for="EventAgeGroup">Event age group</label><input class="form-control" id="EventAgeGroup" readonly></div>
+<div class="col-md-4"><label class="form-label" for="IndividualGroup">Individual or group</label><input class="form-control" id="IndividualGroup" readonly></div>
+<div class="col-md-4"><label class="form-label" for="OnStageOffStage">Stage</label><input class="form-control" id="OnStageOffStage" readonly></div>
+<div class="col-12"><label class="form-label" for="contestantFilter">Contestant</label>
+<div class="position-relative" id="contestantPicker">
+<input class="form-control" type="search" id="contestantFilter" placeholder="Start typing a first or last name" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="contestantResults" aria-describedby="contestantCount" required disabled>
+<input type="hidden" id="ContestantID">
+<div id="contestantResults" role="listbox" aria-label="Matching contestants" class="list-group position-absolute w-100 shadow bg-white" style="z-index:1000;max-height:18rem;overflow-y:auto" hidden></div>
+</div><div id="contestantCount" class="form-text" role="status">Type a name, then choose a matching contestant.</div></div>
+<div class="col-md-4"><label class="form-label" for="ContestantFirstName">First name</label><input class="form-control" id="ContestantFirstName" readonly></div>
+<div class="col-md-4"><label class="form-label" for="ContestantLastName">Last name</label><input class="form-control" id="ContestantLastName" readonly></div>
+<div class="col-md-4"><label class="form-label" for="ContestantMission">Mission</label><input class="form-control" id="ContestantMission" readonly></div>
+<div class="col-md-4"><label class="form-label" for="ChestNo">Chest number</label><input class="form-control" id="ChestNo" readonly></div>
+<div class="col-md-4"><label class="form-label" for="Comments">Comments (optional)</label><input class="form-control" id="Comments" maxlength="50"></div></div><p id="selectionHint" class="text-secondary mt-3" role="status">Select an event and contestant.</p><button id="saveButton" class="btn btn-primary mt-2" type="submit" disabled>Save registration</button>
+        <div id="message" class="alert mt-3 mb-0 d-none" role="alert"></div>
+      </form>
+    </div></section>
+  </main>
+  <main id="accessDenied" class="container d-flex align-items-center min-vh-100 py-4"><div class="card shadow-sm border-0 mx-auto" style="max-width:28rem;width:100%"><div class="card-body p-4 text-center"><h1 class="h4">Sign-in required</h1><p id="accessMessage" class="text-secondary mb-0">Checking your session…</p></div></div></main>
+  <script src="/logout.js"></script>
+  <script src="/event-registrations.js"></script>
+</body>
+</html>

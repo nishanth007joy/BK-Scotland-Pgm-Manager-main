@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mission standings | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="panel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div><h1 class="h3 mb-1">Reports</h1><p class="text-secondary mb-0">Mission standings</p></div>
+      <div class="text-end"><a class="small me-2" href="/home.html">Home</a><span id="signedInAs" class="small text-secondary d-block"></span><button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <section class="card shadow-sm border-0 mb-4"><div class="card-body p-4">
+      <h2 class="h5">Mission standings</h2>
+      <p class="text-secondary">Combines published award points from individual and group events across all age groups and stages, including WalkOver points. All missions are listed, including those with zero points. Equal totals share a place; the next total takes the next place.</p>
+      <div class="row g-3 align-items-end">
+        <div class="col-md-10"><label class="form-label" for="filter">Find a mission</label><input class="form-control" id="filter" type="search" placeholder="Search by mission" disabled></div>
+        <div class="col-md-2"><button class="btn btn-outline-primary" id="reload" type="button" disabled>Refresh</button></div>
+      </div>
+      <div id="message" class="alert alert-danger mt-3 mb-0 d-none" role="alert"></div>
+    </div></section>
+    <section class="card shadow-sm border-0"><div class="card-body p-4">
+      <p id="listStatus" role="status">Loading mission standings...</p>
+      <div class="table-responsive"><table class="table align-middle">
+        <caption>Mission standings by combined published points</caption>
+        <thead><tr><th scope="col">Place</th><th scope="col">Mission</th><th scope="col">Individual points</th><th scope="col">Group points</th><th scope="col">Total points</th></tr></thead>
+        <tbody id="missions"></tbody>
+      </table></div>
+    </div></section>
+  </main>
+  <main id="accessDenied" class="container py-5"><h1 class="h4">Sign-in required</h1><p id="accessMessage">Checking your session...</p></main>
+  <script src="/logout.js"></script>
+  <script src="/mission-standings.js"></script>
+</body>
+</html>

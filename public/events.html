@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event entry | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="entryPanel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div><h1 class="h3 mb-1">Event data entry</h1><p class="text-secondary mb-0">Bible Kalothsavam - Scotland 2026</p></div>
+      <div class="text-end"><a class="small me-2" href="/home.html">Home</a><span id="signedInAs" class="small text-secondary d-block"></span><a id="adminLink" class="small d-none" href="/register.html">Create user</a><button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <nav class="mb-3" aria-label="Events"><a class="me-3" href="/event-list.html">List all events</a><a href="/edit-event.html">Edit event details</a></nav>
+    <section class="card shadow-sm border-0"><div class="card-body p-4">
+      <form id="eventForm" novalidate>
+        <div class="row g-3">
+          <div class="col-md-4"><label class="form-label" for="EventID">Event ID</label><input class="form-control" id="EventID" placeholder="Assigned automatically on save" readonly></div>
+          <div class="col-md-4"><label class="form-label" for="EventName">Event name</label><input class="form-control" id="EventName" maxlength="50" required autofocus></div>
+          <div class="col-md-4"><label class="form-label" for="EventAgeGroup">Age group</label><select class="form-select" id="EventAgeGroup" required disabled><option value="">Loading age groups...</option></select></div>
+          <div class="col-md-4"><label class="form-label" for="IndividualGroup">Individual or group</label><select class="form-select" id="IndividualGroup" required><option value="">Select a type</option><option value="Individual">Individual</option><option value="Group">Group</option></select></div>
+          <div class="col-md-4"><label class="form-label" for="OnStageOffStage">Stage</label><select class="form-select" id="OnStageOffStage" required><option value="">Select a stage</option><option value="OnStage">On stage</option><option value="OffStage">Off stage</option></select></div>
+          <div class="col-md-4"><label class="form-label" for="Comments">Comments (optional)</label><input class="form-control" id="Comments" maxlength="50"></div>
+        </div>
+        <button class="btn btn-primary mt-4" type="submit">Save event</button>
+        <div id="message" class="alert mt-3 mb-0 d-none" role="alert"></div>
+      </form>
+    </div></section>
+  </main>
+  <main id="accessDenied" class="container d-flex align-items-center min-vh-100 py-4"><div class="card shadow-sm border-0 mx-auto" style="max-width:28rem;width:100%"><div class="card-body p-4 text-center"><h1 class="h4">Sign-in required</h1><p id="accessMessage" class="text-secondary mb-0">Checking your session…</p></div></div></main>
+  <script src="/logout.js"></script>
+  <script>
+    const fields = ["EventName","EventAgeGroup","IndividualGroup","OnStageOffStage","Comments"];
+    function showMessage(text, type) { const message = document.getElementById('message'); message.textContent = text; message.className = `alert mt-3 mb-0 alert-${type}`; }
+    async function loadAgeCategories() {
+      const select = document.getElementById('EventAgeGroup');
+      const response = await fetch('/api/age-categories', { method: 'POST' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.message || 'Unable to load age ranges.');
+      select.replaceChildren(new Option('Select an age range', ''));
+      result.ageCategories.forEach((category) => select.add(new Option(category.name, category.name)));
+      select.disabled = false;
+    }
+    async function verifySession() {
+      const response = await fetch('/api/session', { method: 'POST' });
+      if (!response.ok) { document.getElementById('accessMessage').innerHTML = 'Please <a href="/">sign in</a> to enter events.'; return; }
+      const session = await response.json();
+      document.getElementById('signedInAs').textContent = `Signed in as ${session.name}`;
+      if (session.isAdmin) document.getElementById('adminLink').classList.remove('d-none');
+      document.getElementById('accessDenied').classList.replace('d-flex', 'd-none');
+      document.getElementById('entryPanel').classList.replace('d-none', 'd-block');
+      try { await loadAgeCategories(); }
+      catch (error) { showMessage(error.message, 'danger'); }
+    }
+    document.getElementById('eventForm').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = event.currentTarget;
+      const data = Object.fromEntries(fields.map((field) => [field, document.getElementById(field).value]));
+      if (!form.reportValidity() || fields.some((field) => field !== 'Comments' && !data[field].trim())) { showMessage('Complete all required fields with valid values.', 'danger'); return; }
+      const button = form.querySelector('button[type="submit"]'); button.disabled = true; button.textContent = 'Saving…';
+      try {
+        const response = await fetch('/api/events', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+        const body = await response.text();
+        let result = {};
+        try { result = body ? JSON.parse(body) : {}; } catch (error) { console.warn('Non-JSON save response:', body); }
+        if (response.ok) {
+          showMessage(result.message || 'Event saved.', 'success');
+          form.reset();
+          document.getElementById('EventName').focus();
+        } else {
+          showMessage(result.message || `Save failed (HTTP ${response.status}).`, 'danger');
+        }
+      } catch (error) { console.error('Event save request failed:', error); showMessage('Unable to contact the server.', 'danger'); }
+      finally { button.disabled = false; button.textContent = 'Save event'; }
+    });
+    verifySession().catch(() => { document.getElementById('accessMessage').textContent = 'Unable to verify your session.'; });
+  </script>
+</body>
+</html>

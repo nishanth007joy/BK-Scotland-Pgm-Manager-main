@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Single event registrations | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="listPanel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <div><h1 class="h3 mb-1">Single event registrations</h1><p class="text-secondary mb-0">Bible Kalothsavam - Scotland 2026</p></div>
+      <div class="text-end"><a class="small me-3" href="/event-registrations.html">Add single registration</a><a class="small me-3" href="/edit-event-registration.html">Edit single registration</a><a class="small me-3" href="/group-contestant-list.html">List group event registrations</a><a class="small" href="/home.html">Home</a><span id="signedInAs" class="small text-secondary d-block"></span><button class="btn btn-sm btn-outline-secondary ms-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <section class="card shadow-sm border-0"><div class="card-body p-4">
+      <label class="form-label" for="filter">Find a registration</label>
+      <input class="form-control mb-3" id="filter" type="search" placeholder="Search by event, contestant, mission, age group, or chest number">
+      <p id="listStatus" role="status">Loading registrations...</p>
+      <div id="message" class="alert alert-danger d-none" role="alert"></div>
+      <div class="table-responsive"><table class="table table-striped align-middle">
+        <caption>Single event registrations grouped by event name and age group</caption>
+        <thead><tr><th scope="col">Event ID</th><th scope="col">Event name</th><th scope="col">Age group</th><th scope="col">Contestant ID</th><th scope="col">First name</th><th scope="col">Last name</th><th scope="col">Mission</th><th scope="col">Chest number</th><th scope="col">Comments</th></tr></thead>
+        <tbody id="contestants"></tbody>
+      </table></div>
+    </div></section>
+  </main>
+  <main id="accessDenied" class="container py-5"><h1 class="h4">Sign-in required</h1><p id="accessMessage">Checking your session...</p></main>
+  <script src="/logout.js"></script>
+  <script src="/event-registration-list.js"></script>
+</body>
+</html>

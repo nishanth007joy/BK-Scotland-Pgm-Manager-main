@@ -1,0 +1,12 @@
+node_modules/
+.npm-cache/
+.env
+.env.*
+!.env.example
+DB/
+*.bak
+*.mdf
+*.ndf
+*.ldf
+*.tmp.cjs
+Server.js_db*

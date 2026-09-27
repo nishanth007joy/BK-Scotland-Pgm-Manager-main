@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Home | Bible Kalothsavam - Scotland 2026</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  <script src="/branding.js" defer></script>
+</head>
+<body class="bg-body-tertiary">
+  <main id="homePanel" class="container py-5 d-none">
+    <div class="d-flex justify-content-between align-items-center mb-5">
+      <div><h1 class="h3 mb-1">Bible Kalothsavam - Scotland 2026</h1><p class="text-secondary mb-0">Select an area to continue</p></div>
+      <div class="text-end"><span id="signedInAs" class="small text-secondary d-block"></span><button class="btn btn-sm btn-outline-secondary mt-2" type="button" data-logout>Logout</button></div>
+    </div>
+    <details id="administrationMenu" class="card border-0 shadow-sm mb-4 d-none">
+      <summary class="p-3 fw-semibold text-primary">Administration</summary>
+      <nav class="px-3 pb-3" aria-label="Administration">
+        <ul class="list-unstyled mb-0">
+          <li class="mb-2"><a id="adminLink" href="/register.html">Create user</a></li>
+          <li class="mb-2"><a id="passwordResetLink" href="/reset-password.html">Reset user password</a></li>
+          <li class="mb-2"><a id="sessionsLink" href="/admin-sessions.html">Manage sessions</a></li>
+          <li class="mb-2"><a id="currentEventLink" href="/current-event.html">Set current event name</a></li>
+          <li class="mb-2"><a id="adminContestantLink" href="/edit-contestant.html">Update contestant details and all linked entries</a></li>
+          <li class="mb-2"><a id="adminEventNameLink" href="/admin-event-name.html">Update event name and all linked entries</a></li>
+          <li class="mb-2"><a id="deleteUserLink" class="text-danger" href="/delete-user.html">Delete user</a></li>
+          <li><a id="resetDataLink" class="text-danger" href="/reset-data.html">Delete competition data</a></li>
+        </ul>
+      </nav>
+    </details>
+    <div class="row g-4">
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm border-0">
+          <div class="card-body p-4"><h2 class="h5 text-primary">Contestants</h2><p class="text-secondary mb-3">Add contestant details, mission, age range, and chest numbers.</p><a class="d-block mb-2" href="/group-contestant-list.html">List group contestants</a><a class="d-block mb-2" href="/contestants.html">Add contestant</a><a class="d-block mb-2" href="/contestant-list.html">List all contestants</a><a class="d-block mb-2" href="/edit-contestant.html">Edit contestant details</a></div>
+        </div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm border-0"><div class="card-body p-4"><h2 class="h5 text-primary">Events</h2><p class="text-secondary mb-3">Manage events, age groups, and stage details.</p><a class="d-block mb-2" href="/events.html">Add event</a><a class="d-block mb-2" href="/event-list.html">List all events</a><a class="d-block mb-2" href="/edit-event.html">Edit event details</a></div></div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm border-0"><div class="card-body p-4"><h2 class="h5 text-primary">Event registrations</h2><p class="text-secondary mb-3">Register contestants and groups for events.</p><a class="d-block mb-2" href="/event-registration-list.html">List single event registrations</a><a class="d-block mb-2" href="/group-contestant-list.html">List group event registrations</a><a class="d-block mb-2" href="/event-registrations.html">Single Event Registrations</a><a class="d-block mb-2" href="/edit-event-registration.html">Edit Single Event Registrations</a><a class="d-block mb-2" href="/edit-group-registration.html">Edit group event registration</a><a class="d-block mb-2" href="/group-contestants.html">Group Event Registrations</a></div></div>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <a class="card h-100 shadow-sm border-0 text-decoration-none" href="/results.html"><div class="card-body p-4"><h2 class="h5 text-primary">Results entry</h2><p class="text-secondary mb-0">Choose an event and age group, then enter scores for registered contestants.</p></div></a>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <a class="card h-100 shadow-sm border-0 text-decoration-none" href="/publish-results.html"><div class="card-body p-4"><h2 class="h5 text-primary">Approve and Publish Results</h2><p class="text-secondary mb-0">Review saved scores from another user and publish the top places.</p></div></a>
+      </div>
+      <div class="col-md-6 col-lg-4">
+        <div class="card h-100 shadow-sm border-0"><div class="card-body p-4"><h2 class="h5 text-primary">Published results</h2><p class="text-secondary mb-3">View published places, scores, and points by event name and age group.</p><a class="d-block mb-2" href="/published-results.html">View published results</a><a class="d-block mb-2" href="/unprinted-certificates.html">Events with certificates not printed</a><a class="d-block mb-2" href="/unprinted-results.html">Results not printed</a></div></div>
+      </div>
+    </div>
+    <section class="mt-5" aria-labelledby="resultsBoardHeading">
+      <h2 class="h4 mb-3" id="resultsBoardHeading">Results board</h2>
+      <div class="row g-4"><div class="col-md-6 col-lg-4">
+        <a class="card h-100 shadow-sm border-0 text-decoration-none" href="/results-display.html"><div class="card-body p-4"><h3 class="h5 text-primary">Scrolling results display</h3><p class="text-secondary mb-0">All published results grouped by event and age group, refreshed after each scrolling cycle.</p></div></a>
+      </div></div>
+    </section>
+    <section class="mt-5" aria-labelledby="reportsHeading">
+      <h2 class="h4 mb-3" id="reportsHeading">Reports</h2>
+      <div class="row g-4"><div class="col-md-6 col-lg-4">
+        <a class="card h-100 shadow-sm border-0 text-decoration-none" href="/reports.html"><div class="card-body p-4"><h3 class="h5 text-primary">Records without score</h3><p class="text-secondary mb-0">List individual and group result records without scores, excluding WalkOver.</p></div></a>
+      </div><div class="col-md-6 col-lg-4"><a class="card h-100 shadow-sm border-0 text-decoration-none" href="/individual-top-scorers.html"><div class="card-body p-4"><h3 class="h5 text-primary">Individual top scorers</h3><p class="text-secondary mb-0">Show the first four places by total published individual-event points, including ties.</p></div></a></div>
+    <div class="col-md-6 col-lg-4"><a class="card h-100 shadow-sm border-0 text-decoration-none" href="/mission-standings.html"><div class="card-body p-4"><h3 class="h5 text-primary">Mission standings</h3><p class="text-secondary mb-0">All missions ranked by combined individual and group points.</p></div></a></div></div></section>
+  </main>
+  <main id="accessDenied" class="container d-flex align-items-center min-vh-100 py-4"><div class="card shadow-sm border-0 mx-auto" style="max-width:28rem;width:100%"><div class="card-body p-4 text-center"><h1 class="h4">Sign-in required</h1><p id="accessMessage" class="text-secondary mb-0">Checking your session…</p></div></div></main>
+  <script src="/logout.js"></script>
+  <script>
+    async function verifySession() {
+      const response = await fetch('/api/session', { method: 'POST' });
+      if (!response.ok) { document.getElementById('accessMessage').innerHTML = 'Please <a href="/">sign in</a> to continue.'; return; }
+      const session = await response.json();
+      document.getElementById('signedInAs').textContent = `Signed in as ${session.name}`;
+      if (session.isAdmin) {
+        document.getElementById('administrationMenu').classList.remove('d-none');
+      }
+      document.getElementById('accessDenied').classList.replace('d-flex', 'd-none');
+      document.getElementById('homePanel').classList.replace('d-none', 'd-block');
+    }
+    verifySession().catch(() => { document.getElementById('accessMessage').textContent = 'Unable to verify your session.'; });
+  </script>
+</body>
+</html>
