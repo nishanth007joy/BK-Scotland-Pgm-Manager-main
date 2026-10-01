@@ -15,6 +15,83 @@ module.exports = function registerResultsRoutes(app, { db, dbReady, authMiddlewa
     WHERE LOWER(TRIM(e.individual_group)) = 'group'
   ) registrations_source`;
 
+  async function publishWinners(tq, eventId, ageGroup, username) {
+    const woRows = await tq(
+      `SELECT 1 FROM prepub_results WHERE event_id = @eventId AND event_age_group = @ageGroup AND TRIM(event_attendance) = 'WalkOver' LIMIT 1`,
+      { eventId, ageGroup }
+    );
+    if (woRows.recordset.length) {
+      const regCount = await tq(`
+        SELECT COUNT(*) AS cnt FROM (
+          SELECT contestant_id FROM event_registrations
+          WHERE event_id = @eventId AND event_age_group = @ageGroup
+          UNION ALL
+          SELECT g.id FROM group_contestants g
+          JOIN events e ON e.event_id = g.event_id AND e.event_age_group = g.age_group
+          WHERE g.event_id = @eventId AND e.event_age_group = @ageGroup
+            AND LOWER(TRIM(e.individual_group)) = 'group'
+        ) sub
+      `, { eventId, ageGroup });
+      if (Number(regCount.recordset[0].cnt) !== 1)
+        throw Object.assign(new Error('[51050] WalkOver requires exactly one registered participant. Reload and correct the result.'), {});
+    }
+    const missingRules = await tq(`
+      SELECT 1 FROM prepub_results r
+      WHERE r.event_id = @eventId AND r.event_age_group = @ageGroup
+        AND TRIM(r.event_attendance) IN ('Completed', 'WalkOver')
+        AND NOT EXISTS (
+          SELECT 1 FROM event_points ep
+          WHERE UPPER(REPLACE(TRIM(ep.individual_group), ' ', '')) =
+                UPPER(REPLACE(TRIM(r.individual_group), ' ', ''))
+            AND UPPER(REPLACE(TRIM(ep.on_stage_off_stage), ' ', '')) =
+                UPPER(REPLACE(TRIM(r.on_stage_off_stage), ' ', ''))
+        )
+      LIMIT 1
+    `, { eventId, ageGroup });
+    if (missingRules.recordset.length)
+      throw Object.assign(new Error('[51049] Each winner needs exactly one matching points rule in event_points.'), {});
+    await tq('DELETE FROM published_results WHERE event_id = @eventId AND event_age_group = @ageGroup', { eventId, ageGroup });
+    const ins = await tq(`
+      WITH ranked AS (
+        SELECT *,
+          ROW_NUMBER() OVER (ORDER BY score DESC NULLS LAST, contestant_id ASC) AS place_number
+        FROM prepub_results
+        WHERE event_id = @eventId AND event_age_group = @ageGroup
+          AND TRIM(event_attendance) IN ('Completed', 'WalkOver')
+      )
+      INSERT INTO published_results (
+        event_id, event_name, event_age_group, individual_group, on_stage_off_stage,
+        contestant_id, contestant_first_name, contestant_last_name, contestant_mission, chest_no,
+        score, place, points, score_last_edited_by, approved_by, approved_at, is_walkover
+      )
+      SELECT
+        r.event_id, r.event_name, r.event_age_group, r.individual_group, r.on_stage_off_stage,
+        r.contestant_id, r.contestant_first_name, r.contestant_last_name,
+        r.contestant_mission, r.chest_no,
+        r.score,
+        CASE r.place_number WHEN 1 THEN 'First' WHEN 2 THEN 'Second' ELSE 'Third' END,
+        CASE
+          WHEN TRIM(r.event_attendance) = 'WalkOver' THEN r.points
+          WHEN r.place_number = 1 THEN ep.first_place
+          WHEN r.place_number = 2 THEN ep.second_place
+          ELSE ep.third_place
+        END,
+        r.score_last_edited_by,
+        @username,
+        NOW(),
+        (TRIM(r.event_attendance) = 'WalkOver')
+      FROM ranked r
+      JOIN event_points ep
+        ON UPPER(REPLACE(TRIM(ep.individual_group), ' ', '')) =
+           UPPER(REPLACE(TRIM(r.individual_group), ' ', ''))
+       AND UPPER(REPLACE(TRIM(ep.on_stage_off_stage), ' ', '')) =
+           UPPER(REPLACE(TRIM(r.on_stage_off_stage), ' ', ''))
+      WHERE r.place_number <= 3
+      RETURNING event_id
+    `, { eventId, ageGroup, username });
+    return ins.rowCount;
+  }
+
   const validText = v => typeof v === 'string' && v.trim().length > 0 && v.trim().length <= 50;
   const validPoints = v => Number.isInteger(v) && v >= 0 && v <= 2147483647;
   const validScore = v => Number.isFinite(v) && v >= 0 && v <= 2147483647 && Number(v.toFixed(2)) === v;
@@ -345,7 +422,7 @@ module.exports = function registerResultsRoutes(app, { db, dbReady, authMiddlewa
         if (isPublishedEvent) {
           await tq(`UPDATE prepub_results SET checked_approved = 'approved', checked_approved_by = @username
             WHERE event_id = @eventId AND event_age_group = @ageGroup`, { username, eventId, ageGroup });
-          await tq('SELECT publish_winners(@eventId, @ageGroup, @username, NOW())', { eventId, ageGroup, username });
+          await publishWinners(tq, eventId, ageGroup, username);
         }
 
         const savedRow = await tq(`
@@ -456,9 +533,8 @@ module.exports = function registerResultsRoutes(app, { db, dbReady, authMiddlewa
         await tq(`UPDATE prepub_results SET checked_approved = 'approved', checked_approved_by = @username
           WHERE event_id = @eventId AND event_age_group = @ageGroup`, { username, eventId, ageGroup });
 
-        const countRow = await tq('SELECT publish_winners(@eventId, @ageGroup, @username, NOW()) AS cnt',
-          { eventId, ageGroup, username });
-        return countRow.recordset[0].cnt;
+        const cnt = await publishWinners(tq, eventId, ageGroup, username);
+        return cnt;
       });
 
       notifyPublishedResults();

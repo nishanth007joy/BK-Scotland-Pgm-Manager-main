@@ -73,8 +73,8 @@ const en = db.errorNumber(error);      // returns numeric code (custom number OR
 | 51001  | `uq_events_identity` unique index violation guard | Duplicate event |
 | 51002  | `uq_contestants_name_mission` guard | Duplicate contestant name+mission |
 | 51003  | `uq_contestants_chest` guard | Duplicate chest number |
-| 51004  | `check_individual_registration_limit` trigger | >3 individual event registrations |
-| 51005  | `check_group_registration_limit` trigger | >3 group event registrations |
+| 51004  | `Server.js` POST `/api/event-registrations` | >3 individual event registrations |
+| 51005  | `group-contestant-routes.js` `saveGroup` | >3 group event registrations per member |
 | 51060  | Application code (`Object.assign(new Error('[51060] ...'), {})`) | Optimistic-lock / stale data conflict |
 | 51063  | Application code | Group already has results |
 | 51070  | Application code | User not found (password reset) |
@@ -105,11 +105,8 @@ await tq('INSERT INTO contestants (id, ...) VALUES (@id, ...)', { id, ... });
 - `uq_contestants_onstage_chest` / `uq_contestants_offstage_chest` — trimmed chest numbers
 - `uq_group_contestants` — (event_id, group_leader_id)
 
-### `publish_winners()` function
-Publishing results calls the DB function directly — no large SQL string in application code:
-```js
-await tq('SELECT publish_winners(@eventId, @ageGroup, @username, @approvedAt)', params);
-```
+### Publishing results
+`publishWinners(tq, eventId, ageGroup, username)` in `results-routes.js` handles all publish logic: WalkOver count validation, points rules validation, DELETE old published results, and ranked INSERT of top 3. No DB functions or triggers involved.
 
 ## Test patterns
 

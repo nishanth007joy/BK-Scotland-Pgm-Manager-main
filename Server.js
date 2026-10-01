@@ -616,30 +616,43 @@ app.post('/api/event-registrations', authMiddleware, async (req, res) => {
   }
   try {
     await dbReady;
-    // Copy from source tables in one statement — never trust posted display fields.
-    const result = await db.query(`
-      INSERT INTO event_registrations
-        (event_id, event_name, event_age_group, individual_group, on_stage_off_stage,
-         contestant_id, contestant_first_name, contestant_last_name, contestant_mission, chest_no, comments)
-      SELECT e.event_id, e.event_name, e.event_age_group, e.individual_group, e.on_stage_off_stage,
-        c.id, c.first_name, c.last_name, c.mission,
-        CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
-          WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no
-        END,
-        @comments
-      FROM events e, contestants c
-      WHERE e.event_id = @eventId AND c.id = @contestantId
-        AND (LOWER(TRIM(e.individual_group)) <> 'individual'
-          OR (TRIM(e.event_age_group) <> ''
-            AND LOWER(TRIM(e.event_age_group)) = LOWER(TRIM(c.age_group))))
-        AND NULLIF(TRIM(
+    const inserted = await db.withTransaction(async (tq) => {
+      // Copy from source tables in one statement — never trust posted display fields.
+      const ins = await tq(`
+        INSERT INTO event_registrations
+          (event_id, event_name, event_age_group, individual_group, on_stage_off_stage,
+           contestant_id, contestant_first_name, contestant_last_name, contestant_mission, chest_no, comments)
+        SELECT e.event_id, e.event_name, e.event_age_group, e.individual_group, e.on_stage_off_stage,
+          c.id, c.first_name, c.last_name, c.mission,
           CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
             WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no
-          END
-        ), '') IS NOT NULL
-    `, { eventId: data.EventID, contestantId: data.ContestantID, comments: data.Comments || null });
+          END,
+          @comments
+        FROM events e, contestants c
+        WHERE e.event_id = @eventId AND c.id = @contestantId
+          AND (LOWER(TRIM(e.individual_group)) <> 'individual'
+            OR (TRIM(e.event_age_group) <> ''
+              AND LOWER(TRIM(e.event_age_group)) = LOWER(TRIM(c.age_group))))
+          AND NULLIF(TRIM(
+            CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
+              WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no
+            END
+          ), '') IS NOT NULL
+      `, { eventId: data.EventID, contestantId: data.ContestantID, comments: data.Comments || null });
+      if (ins.rowCount !== 1) return 0;
 
-    if (result.rowCount !== 1) {
+      // Enforce individual event limit (max 3) in Node.js
+      const limitCheck = await tq(`
+        SELECT COUNT(*) AS cnt FROM event_registrations
+        WHERE contestant_id = @contestantId AND LOWER(TRIM(individual_group)) = 'individual'
+      `, { contestantId: data.ContestantID });
+      if (Number(limitCheck.recordset[0].cnt) > 3)
+        throw Object.assign(new Error('[51004] A contestant can register for a maximum of 3 individual items across on-stage and off-stage events combined.'), {});
+
+      return 1;
+    });
+
+    if (!inserted) {
       return res.status(400).json({ message: 'Select an existing event and contestant with unique IDs, a valid event stage, and a chest number for that stage. Individual events require the contestant and event to have the same age group. Reload the page if their details have changed.' });
     }
     return res.status(201).json({ message: 'Event registration saved.' });

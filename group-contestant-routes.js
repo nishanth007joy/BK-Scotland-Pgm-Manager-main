@@ -124,6 +124,27 @@ module.exports = function registerGroupContestants(app, { db, dbReady, authMiddl
       }
 
       const result = await db.withTransaction(async (tq) => {
+        // Enforce group event limit (max 3 per member) in Node.js
+        if (uniqueIds.length) {
+          const limitResult = await tq(`
+            SELECT cid FROM (
+              SELECT UNNEST(ARRAY[
+                group_leader_id, participant_1_id, participant_2_id, participant_3_id,
+                participant_4_id, participant_5_id, participant_6_id, participant_7_id,
+                participant_8_id, participant_9_id
+              ]) AS cid
+              FROM group_contestants
+              WHERE id <> @excludeId
+            ) t
+            WHERE cid IN (${inClause})
+            GROUP BY cid
+            HAVING COUNT(*) >= 3
+            LIMIT 1
+          `, { ...idParams, excludeId: editing ? original.ID : '' });
+          if (limitResult.recordset.length)
+            throw Object.assign(new Error('[51005] A contestant can register for a maximum of 3 group events, counting both group leader and participant roles.'), {});
+        }
+
         if (editing) {
           const hasResults = await tq(
             'SELECT 1 FROM prepub_results WHERE contestant_id = @id UNION ALL SELECT 1 FROM published_results WHERE contestant_id = @id LIMIT 1',
