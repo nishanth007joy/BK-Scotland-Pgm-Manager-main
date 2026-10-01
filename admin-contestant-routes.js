@@ -1,106 +1,140 @@
 const crypto = require('node:crypto');
 const fields = ['FirstName', 'LastName', 'AgeGroup', 'Mission', 'Region', 'OnStageChestNo', 'OffStageChestNo', 'Comments'];
-const memberFields = ['GroupLeader', ...Array.from({ length: 9 }, (_, i) => `Participant${i + 1}`)];
-const membership = memberFields.map(field => `g.${field}ID=@id`).join(' OR ');
-const tables = ['EventRegistrations', 'PrePubResults', 'PublishedResults'];
+const memberIdCols = ['group_leader_id', ...Array.from({ length: 9 }, (_, i) => `participant_${i + 1}_id`)];
 const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-module.exports = function registerAdminContestants(app, { db, dbReady, sql, requireAdmin }) {
-  async function snapshot(request) {
-    const result = await request.query(`
-      SELECT ID AS ContestantID, [First Name] AS FirstName, [Last Name] AS LastName,
-        AgeGroup, Mission, Region, OnStageChestNo, OffStageChestNo, Comments
-        FROM dbo.Contestants WITH (UPDLOCK,HOLDLOCK) WHERE ID=@id;
-      SELECT g.* FROM dbo.GroupContestants g WITH (UPDLOCK,HOLDLOCK)
-        WHERE ${membership} ORDER BY g.ID;
-      ${tables.map(table => `SELECT r.* FROM dbo.${table} r WITH (UPDLOCK,HOLDLOCK)
-        WHERE (r.ContestantID=@id AND LOWER(RTRIM(r.IndividualGroup))='individual')
-          OR (LOWER(RTRIM(r.IndividualGroup))='group' AND EXISTS
-            (SELECT 1 FROM dbo.GroupContestants g WITH (UPDLOCK,HOLDLOCK)
-             WHERE g.ID=r.ContestantID AND g.EventID=r.EventID AND (${membership})))
-        ORDER BY r.EventID, r.EventAgeGroup, r.ContestantID;`).join('\n')}`);
-    return { contestant: result.recordsets[0][0], groups: result.recordsets[1],
-      registrations: result.recordsets[2], prepubResults: result.recordsets[3], publishedResults: result.recordsets[4] };
+module.exports = function registerAdminContestants(app, { db, dbReady, requireAdmin }) {
+  const memberWhere = memberIdCols.map(c => `g.${c} = @id`).join(' OR ');
+
+  async function snapshot(tq, id) {
+    const [c, g, er, pr, pub] = await Promise.all([
+      tq(`SELECT id AS "ContestantID", first_name AS "FirstName", last_name AS "LastName",
+        age_group AS "AgeGroup", mission AS "Mission", region AS "Region",
+        TRIM(on_stage_chest_no) AS "OnStageChestNo", TRIM(off_stage_chest_no) AS "OffStageChestNo",
+        comments AS "Comments"
+        FROM contestants WHERE id = @id FOR UPDATE`, { id }),
+      tq(`SELECT * FROM group_contestants g WHERE ${memberWhere} ORDER BY g.id`, { id }),
+      tq(`SELECT * FROM event_registrations WHERE
+          (contestant_id = @id AND LOWER(TRIM(individual_group)) = 'individual')
+          OR (LOWER(TRIM(individual_group)) = 'group' AND EXISTS (
+            SELECT 1 FROM group_contestants g
+            WHERE g.id = event_registrations.contestant_id
+              AND g.event_id = event_registrations.event_id AND (${memberWhere})
+          )) ORDER BY event_id, event_age_group, contestant_id`, { id }),
+      tq(`SELECT * FROM prepub_results WHERE
+          (contestant_id = @id AND LOWER(TRIM(individual_group)) = 'individual')
+          OR (LOWER(TRIM(individual_group)) = 'group' AND EXISTS (
+            SELECT 1 FROM group_contestants g
+            WHERE g.id = prepub_results.contestant_id
+              AND g.event_id = prepub_results.event_id AND (${memberWhere})
+          )) ORDER BY event_id, event_age_group, contestant_id`, { id }),
+      tq(`SELECT * FROM published_results WHERE
+          (contestant_id = @id AND LOWER(TRIM(individual_group)) = 'individual')
+          OR (LOWER(TRIM(individual_group)) = 'group' AND EXISTS (
+            SELECT 1 FROM group_contestants g
+            WHERE g.id = published_results.contestant_id
+              AND g.event_id = published_results.event_id AND (${memberWhere})
+          )) ORDER BY event_id, event_age_group, contestant_id`, { id }),
+    ]);
+    return { contestant: c.recordset[0], groups: g.recordset,
+      registrations: er.recordset, prepubResults: pr.recordset, publishedResults: pub.recordset };
   }
+
   async function handle(req, res, saving) {
     res.set('Cache-Control', 'no-store');
     const id = String(req.params.id || '').trim();
     if (!id || id.length > 50) return res.status(400).json({ message: 'Select a valid contestant.' });
     const updated = {};
     if (saving) {
-      if (req.body?.confirmed !== true || typeof req.body?.token !== 'string')
-        return res.status(400).json({ message: 'Review and confirm all affected entries before saving.' });
       for (const field of fields) {
-        if (typeof req.body[field] !== 'string') return res.status(400).json({ message: `${field} must be text.` });
-        updated[field] = req.body[field].trim();
-        if (updated[field].length > (field.endsWith('ChestNo') ? 10 : 50))
+        const value = req.body?.[field];
+        if (value != null && typeof value !== 'string')
+          return res.status(400).json({ message: `${field} must be text.` });
+        updated[field] = String(value || '').trim();
+        const limit = ['OnStageChestNo', 'OffStageChestNo'].includes(field) ? 10 : 50;
+        if (updated[field].length > limit)
           return res.status(400).json({ message: `${field} is too long.` });
       }
-      if (fields.slice(0, 5).some(field => !updated[field]))
-        return res.status(400).json({ message: 'Name, age group, mission and region are required.' });
+      if (['FirstName', 'LastName', 'AgeGroup', 'Mission', 'Region'].some(f => !updated[f]))
+        return res.status(400).json({ message: 'First name, last name, age range, mission, and region are required.' });
+      if (req.body?.confirmed !== true || typeof req.body?.token !== 'string')
+        return res.status(400).json({ message: 'Review all entries and confirm before saving.' });
     }
-    let transaction;
     try {
       await dbReady;
-      transaction = new sql.Transaction(db);
-      await transaction.begin(sql.ISOLATION_LEVEL.SERIALIZABLE);
-      const request = () => new sql.Request(transaction).input('id', sql.NVarChar(50), id);
-      const data = await snapshot(request());
-      if (!data.contestant) {
-        await transaction.rollback(); transaction = null;
-        return res.status(404).json({ message: 'Contestant not found.' });
-      }
-      const token = digest(data);
-      if (!saving) {
-        await transaction.commit(); transaction = null;
-        return res.json({ ...data, token });
-      }
-      if (token !== req.body.token) {
-        await transaction.rollback(); transaction = null;
-        return res.status(409).json({ message: 'Contestant, registrations or results changed. Review the latest entries and confirm again.' });
-      }
-      const individualRows = [...data.registrations, ...data.prepubResults, ...data.publishedResults]
-        .filter(row => String(row.IndividualGroup).trim().toLowerCase() === 'individual');
-      for (const row of individualRows) {
-        const stage = String(row.OnStageOffStage).trim().toLowerCase().replace(/[ -]/g, '');
-        if (!['onstage', 'offstage'].includes(stage) || !updated[stage === 'onstage' ? 'OnStageChestNo' : 'OffStageChestNo']) {
-          const error = new Error(`Event ${row.EventName} requires its stage chest number.`); error.number = 51061; throw error;
+      const result = await db.withTransaction(async (tq) => {
+        const snap = await snapshot(tq, id);
+        if (!snap.contestant) return { status: 404, message: 'Contestant not found. Reload the list.' };
+        const token = digest([snap.contestant, snap.groups, snap.registrations, snap.prepubResults, snap.publishedResults]);
+        if (!saving) {
+          return { token, contestant: snap.contestant, groups: snap.groups,
+            registrations: snap.registrations, prepubResults: snap.prepubResults,
+            publishedResults: snap.publishedResults };
         }
-      }
-      const fullName = `${updated.FirstName} ${updated.LastName}`;
-      if (data.groups.length && (fullName.length > 50 ||
-        (data.groups.some(g => String(g.GroupLeaderID).trim() === id) && `${fullName} & Team`.length > 50))) {
-        const error = new Error('The updated name is too long for the group participant or team name (50 characters).'); error.number = 51061; throw error;
-      }
-      const update = request();
-      for (const field of fields) update.input(field,
-        field.endsWith('ChestNo') ? sql.NChar(10) : field === 'AgeGroup' ? sql.NVarChar(50) : sql.VarChar(50), updated[field] || null);
-      update.input('fullName', sql.VarChar(50), fullName);
-      await update.query(`
-        UPDATE dbo.Contestants SET [First Name]=@FirstName, [Last Name]=@LastName,
-          AgeGroup=@AgeGroup, Mission=@Mission, Region=@Region, OnStageChestNo=@OnStageChestNo,
-          OffStageChestNo=@OffStageChestNo, Comments=@Comments WHERE ID=@id;
-        UPDATE g SET ${memberFields.map(field => `${field}=CASE WHEN ${field}ID=@id THEN @fullName ELSE ${field} END`).join(',')},
-          GroupName=CASE WHEN GroupLeaderID=@id THEN @fullName+' & Team' ELSE GroupName END
-          FROM dbo.GroupContestants g WHERE ${membership};
-        ${tables.map(table => `UPDATE dbo.${table} SET ContestantFirstName=@FirstName,
-          ContestantLastName=@LastName, ContestantMission=@Mission,
-          ChestNo=CASE LOWER(REPLACE(REPLACE(RTRIM(OnStageOffStage),' ',''),'-',''))
-            WHEN 'onstage' THEN @OnStageChestNo WHEN 'offstage' THEN @OffStageChestNo END
-          WHERE ContestantID=@id AND LOWER(RTRIM(IndividualGroup))='individual';
-        UPDATE r SET ContestantFirstName=g.GroupName
-          FROM dbo.${table} r JOIN dbo.GroupContestants g ON g.ID=r.ContestantID AND g.EventID=r.EventID
-          WHERE g.GroupLeaderID=@id AND LOWER(RTRIM(r.IndividualGroup))='group';`).join('\n')}`);
-      await transaction.commit(); transaction = null;
-      res.json({ message: 'Contestant details and all linked registration and result entries updated.' });
+        if (token !== req.body.token)
+          return { status: 409, message: 'Contestant data changed since you loaded it. Reload and try again.' };
+
+        const upd = await tq(`
+          UPDATE contestants SET
+            first_name = @firstName, last_name = @lastName, age_group = @ageGroup,
+            mission = @mission, region = @region,
+            on_stage_chest_no = @onStageChestNo, off_stage_chest_no = @offStageChestNo,
+            comments = @comments
+          WHERE id = @id RETURNING id
+        `, {
+          id,
+          firstName: updated.FirstName, lastName: updated.LastName, ageGroup: updated.AgeGroup,
+          mission: updated.Mission, region: updated.Region,
+          onStageChestNo: updated.OnStageChestNo || null, offStageChestNo: updated.OffStageChestNo || null,
+          comments: updated.Comments || null,
+        });
+        if (!upd.rowCount) return { status: 409, message: 'Contestant not found. Reload the list.' };
+
+        const fullName = `${updated.FirstName} ${updated.LastName}`;
+
+        // Update all three result tables for individual rows
+        for (const table of ['event_registrations', 'prepub_results', 'published_results']) {
+          await tq(`
+            UPDATE ${table} SET
+              contestant_first_name = @firstName, contestant_last_name = @lastName,
+              contestant_mission = @mission,
+              chest_no = CASE LOWER(REPLACE(REPLACE(TRIM(on_stage_off_stage), ' ', ''), '-', ''))
+                WHEN 'onstage' THEN @onStageChestNo WHEN 'offstage' THEN @offStageChestNo
+                ELSE chest_no END
+            WHERE contestant_id = @id AND LOWER(TRIM(individual_group)) = 'individual'
+          `, {
+            id, firstName: updated.FirstName, lastName: updated.LastName, mission: updated.Mission,
+            onStageChestNo: updated.OnStageChestNo || null, offStageChestNo: updated.OffStageChestNo || null,
+          });
+          // Update group result rows where this contestant is the leader (group_name = leader + " & Team")
+          await tq(`
+            UPDATE ${table} SET contestant_first_name = @groupName
+            WHERE contestant_id IN (
+              SELECT id FROM group_contestants WHERE group_leader_id = @id
+            ) AND LOWER(TRIM(individual_group)) = 'group'
+          `, { id, groupName: `${fullName} & Team` });
+        }
+
+        // Update display name fields in group_contestants
+        await tq('UPDATE group_contestants SET group_leader = @name WHERE group_leader_id = @id',
+          { id, name: fullName });
+        for (let i = 1; i <= 9; i++) {
+          await tq(`UPDATE group_contestants SET participant_${i} = @name WHERE participant_${i}_id = @id`,
+            { id, name: fullName });
+        }
+
+        return { message: 'Contestant details saved and all related records updated.' };
+      });
+      if (result.status) return res.status(result.status).json({ message: result.message });
+      return res.json(result);
     } catch (error) {
-      if (transaction) { try { await transaction.rollback(); } catch (_) {} }
-      if ([51061, 51062, 51002, 51063, 2601, 2627, 1205].includes(error.number))
-        return res.status(409).json({ message: error.message });
-      console.error('Admin contestant update error:', error);
-      res.status(500).json({ message: 'Unable to update contestant details. No changes were saved.' });
+      const en = db.errorNumber(error);
+      if (en === 23505) return res.status(409).json({ message: error.detail || error.message });
+      console.error('Admin contestant error:', error);
+      return res.status(500).json({ message: 'Unable to process the request.' });
     }
   }
+
   app.get('/api/admin/contestants/:id', requireAdmin, (req, res) => handle(req, res, false));
   app.put('/api/admin/contestants/:id', requireAdmin, (req, res) => handle(req, res, true));
 };

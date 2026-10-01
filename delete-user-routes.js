@@ -1,14 +1,18 @@
 const crypto = require('node:crypto');
-module.exports = function registerDeleteUsers(app, { db, dbReady, sql, requireAdmin, activeSessions }) {
+module.exports = function registerDeleteUsers(app, { db, dbReady, requireAdmin, activeSessions }) {
   app.get('/api/admin/delete-users', requireAdmin, async (req, res) => {
     res.set('Cache-Control', 'no-store');
     try {
       await dbReady;
-      const result = await db.request().query('SELECT name, email, role FROM dbo.users ORDER BY name, email;');
+      const result = await db.query('SELECT name, email, role FROM users ORDER BY name, email');
       req.session.deleteUserToken = crypto.randomBytes(32).toString('hex');
-      res.json({ users: result.recordset.filter(row => row.email && row.email.trim().toLowerCase() !== req.session.accountKey), token: req.session.deleteUserToken });
+      res.json({
+        users: result.recordset.filter(row => row.email && row.email.trim().toLowerCase() !== req.session.accountKey),
+        token: req.session.deleteUserToken,
+      });
     } catch (_) { res.status(500).json({ message: 'Unable to load users.' }); }
   });
+
   app.post('/api/admin/delete-user', requireAdmin, async (req, res) => {
     const { email, token, confirmed } = req.body || {};
     if (!req.session.deleteUserToken || token !== req.session.deleteUserToken)
@@ -19,30 +23,27 @@ module.exports = function registerDeleteUsers(app, { db, dbReady, sql, requireAd
       return res.status(400).json({ message: 'You cannot delete your own login account.' });
     try {
       await dbReady;
-      await db.request().input('email', sql.NVarChar(255), email.trim())
-        .input('self', sql.NVarChar(255), req.session.accountKey).query(`SET XACT_ABORT ON;
-        BEGIN TRY
-          BEGIN TRANSACTION;
-          IF EXISTS (SELECT 1 FROM sys.foreign_keys WHERE referenced_object_id=OBJECT_ID('dbo.users') AND delete_referential_action<>0 AND is_disabled=0)
-            OR EXISTS (SELECT 1 FROM sys.triggers WHERE parent_id=OBJECT_ID('dbo.users') AND is_disabled=0)
-            THROW 51071, 'Deletion blocked because database rules could change associated records.', 1;
-          IF (SELECT COUNT(*) FROM dbo.users WITH (UPDLOCK,HOLDLOCK) WHERE email=@email)<>1
-            THROW 51070, 'Select one existing user.', 1;
-          DELETE FROM dbo.users WHERE email=@email AND LOWER(LTRIM(RTRIM(email)))<>@self;
-          IF @@ROWCOUNT<>1 THROW 51070, 'Select another existing user.', 1;
-          COMMIT TRANSACTION;
-        END TRY BEGIN CATCH
-          IF @@TRANCOUNT>0 ROLLBACK TRANSACTION; THROW;
-        END CATCH;`);
-      for (const session of activeSessions.list()) {
-        if (session.account === email.trim().toLowerCase()) activeSessions.revoke(session.account, session.id);
+      await db.withTransaction(async (tq) => {
+        const check = await tq('SELECT 1 FROM users WHERE email = @email FOR UPDATE', { email: email.trim() });
+        if (check.recordset.length !== 1)
+          throw Object.assign(new Error('[51070] Select one existing user.'), {});
+        const deleted = await tq(
+          'DELETE FROM users WHERE email = @email AND LOWER(TRIM(email)) <> @self RETURNING email',
+          { email: email.trim(), self: req.session.accountKey }
+        );
+        if (!deleted.rowCount)
+          throw Object.assign(new Error('[51070] Select another existing user.'), {});
+      });
+      for (const s of activeSessions.list()) {
+        if (s.account === email.trim().toLowerCase()) activeSessions.revoke(s.account, s.id);
       }
       res.json({ message: 'Login account deleted. All associated records have been retained.' });
     } catch (error) {
-      const message = error.number === 51071 ? error.message : error.number === 547
-        ? 'The account is referenced by other records. Deletion was blocked to retain those records.'
-        : error.number === 51070 ? 'User no longer exists or is ambiguous. Reload the list.' : 'Unable to delete the login account.';
-      res.status([51071,51070,547].includes(error.number) ? 409 : 500).json({ message });
+      const ce = db.getCustomError(error);
+      if (ce && ce.number === 51070) return res.status(409).json({ message: ce.message });
+      if (db.errorNumber(error) === 547)
+        return res.status(409).json({ message: 'The account is referenced by other records. Deletion was blocked to retain those records.' });
+      res.status(500).json({ message: 'Unable to delete the login account.' });
     }
   });
 };

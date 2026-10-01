@@ -1,16 +1,24 @@
-module.exports = (app, { db, dbReady, sql, authMiddleware }) => {
+module.exports = (app, { db, dbReady, authMiddleware }) => {
   app.get('/api/event-registrations', authMiddleware, async (req, res) => {
     try {
       await dbReady;
-      const result = await db.request().query(`SELECT EventID, ContestantID, EventName, EventAgeGroup,
-        ContestantFirstName, ContestantLastName, ContestantMission, ChestNo, Comments
-        FROM dbo.EventRegistrations ORDER BY EventName, ContestantFirstName, ContestantLastName;`);
+      const result = await db.query(`
+        SELECT event_id AS "EventID", contestant_id AS "ContestantID",
+          event_name AS "EventName", event_age_group AS "EventAgeGroup",
+          contestant_first_name AS "ContestantFirstName",
+          contestant_last_name AS "ContestantLastName",
+          contestant_mission AS "ContestantMission",
+          TRIM(chest_no) AS "ChestNo", comments AS "Comments"
+        FROM event_registrations
+        ORDER BY event_name, contestant_first_name, contestant_last_name
+      `);
       res.json({ registrations: result.recordset });
     } catch (error) {
       console.error('List registrations:', error);
       res.status(500).json({ message: 'Unable to load event registrations.' });
     }
   });
+
   app.put('/api/event-registrations', authMiddleware, async (req, res) => {
     const data = {};
     for (const field of ['EventID', 'ContestantID', 'Comments']) {
@@ -20,46 +28,83 @@ module.exports = (app, { db, dbReady, sql, authMiddleware }) => {
       data[field] = (value || '').trim();
     }
     const original = req.body?.Original;
-    const originalFields = ['EventID', 'ContestantID', 'EventName', 'EventAgeGroup', 'ContestantFirstName', 'ContestantLastName', 'ContestantMission', 'ChestNo', 'Comments'];
-    if (!original || originalFields.some(field => (original[field] != null && typeof original[field] !== 'string') || (original[field] || '').length > 50) || !original.EventID || !original.ContestantID)
+    const origFields = ['EventID', 'ContestantID', 'EventName', 'EventAgeGroup',
+      'ContestantFirstName', 'ContestantLastName', 'ContestantMission', 'ChestNo', 'Comments'];
+    if (!original || origFields.some(f => (original[f] != null && typeof original[f] !== 'string') || (original[f] || '').length > 50)
+      || !original.EventID || !original.ContestantID)
       return res.status(400).json({ message: 'Reload the registration before editing.' });
+
     try {
       await dbReady;
-      const request = db.request();
-      for (const field of ['EventID', 'ContestantID', 'Comments']) request.input(field, sql.NVarChar(50), data[field] || null);
-      for (const field of originalFields) request.input(`old${field}`, sql.NVarChar(50), original[field] || null);
-      await request.query(`SET XACT_ABORT ON; BEGIN TRANSACTION; BEGIN TRY
-        IF (SELECT COUNT(*) FROM dbo.EventRegistrations WITH (UPDLOCK,HOLDLOCK)
-          WHERE EventID=@oldEventID AND ContestantID=@oldContestantID)<>1
-          THROW 51060, 'Registration is missing or ambiguous. Reload before editing.', 1;
-        IF EXISTS(SELECT 1 FROM dbo.PrePubResults WITH (UPDLOCK,HOLDLOCK)
-          WHERE (EventID=@oldEventID AND ContestantID=@oldContestantID)
-            OR (EventID=@EventID AND ContestantID=@ContestantID))
-          THROW 51060, 'This registration has results and cannot be changed.', 1;
-        IF EXISTS(SELECT 1 FROM dbo.PublishedResults WITH (UPDLOCK,HOLDLOCK)
-          WHERE (EventID=@oldEventID AND ContestantID=@oldContestantID)
-            OR (EventID=@EventID AND ContestantID=@ContestantID))
-          THROW 51060, 'This registration has published results and cannot be changed.', 1;
-        UPDATE r SET EventID=e.EventID, EventName=e.EventName, EventAgeGroup=e.EventAgeGroup,
-          IndividualGroup=e.IndividualGroup, OnStageOffStage=e.OnStageOffStage,
-          ContestantID=c.ID, ContestantFirstName=c.[First Name], ContestantLastName=c.[Last Name],
-          ContestantMission=c.Mission, ChestNo=chest.ChestNo, Comments=@Comments
-        FROM dbo.EventRegistrations r CROSS JOIN dbo.Events e CROSS JOIN dbo.Contestants c
-        CROSS APPLY (SELECT CASE LOWER(REPLACE(REPLACE(RTRIM(e.OnStageOffStage),' ',''),'-',''))
-          WHEN 'onstage' THEN c.OnStageChestNo WHEN 'offstage' THEN c.OffStageChestNo END AS ChestNo) chest
-        WHERE r.EventID=@oldEventID AND r.ContestantID=@oldContestantID
-          AND ${originalFields.slice(2).map(field => `ISNULL(RTRIM(r.[${field}]),'')=ISNULL(RTRIM(@old${field}),'')`).join(' AND ')}
-          AND e.EventID=@EventID AND c.ID=@ContestantID
-          AND (SELECT COUNT(*) FROM dbo.Events WHERE EventID=@EventID)=1
-          AND (SELECT COUNT(*) FROM dbo.Contestants WHERE ID=@ContestantID)=1
-          AND (LOWER(RTRIM(e.IndividualGroup))<>'individual' OR LOWER(RTRIM(e.EventAgeGroup))=LOWER(RTRIM(c.AgeGroup)))
-          AND NULLIF(RTRIM(chest.ChestNo),'') IS NOT NULL;
-        IF @@ROWCOUNT<>1 THROW 51060, 'Registration changed or the selected contestant is not eligible. Reload and check the age group and chest number.', 1;
-        COMMIT TRANSACTION;
-      END TRY BEGIN CATCH IF @@TRANCOUNT>0 ROLLBACK TRANSACTION; THROW; END CATCH;`);
+      await db.withTransaction(async (tq) => {
+        const existing = await tq(
+          'SELECT 1 FROM event_registrations WHERE event_id = @oldEventId AND contestant_id = @oldContestantId FOR UPDATE',
+          { oldEventId: original.EventID, oldContestantId: original.ContestantID }
+        );
+        if (existing.recordset.length !== 1)
+          throw Object.assign(new Error('[51060] Registration is missing or ambiguous. Reload before editing.'), {});
+
+        const hasResults = await tq(`
+          SELECT 1 FROM prepub_results WHERE
+            (event_id = @oldEventId AND contestant_id = @oldContestantId)
+            OR (event_id = @newEventId AND contestant_id = @newContestantId)
+          UNION ALL
+          SELECT 1 FROM published_results WHERE
+            (event_id = @oldEventId AND contestant_id = @oldContestantId)
+            OR (event_id = @newEventId AND contestant_id = @newContestantId)
+          LIMIT 1
+        `, {
+          oldEventId: original.EventID, oldContestantId: original.ContestantID,
+          newEventId: data.EventID, newContestantId: data.ContestantID,
+        });
+        if (hasResults.recordset.length)
+          throw Object.assign(new Error('[51060] This registration has results and cannot be changed.'), {});
+
+        const upd = await tq(`
+          UPDATE event_registrations er SET
+            event_id = e.event_id, event_name = e.event_name, event_age_group = e.event_age_group,
+            individual_group = e.individual_group, on_stage_off_stage = e.on_stage_off_stage,
+            contestant_id = c.id, contestant_first_name = c.first_name,
+            contestant_last_name = c.last_name, contestant_mission = c.mission,
+            chest_no = CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
+              WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no END,
+            comments = @comments
+          FROM events e, contestants c
+          WHERE er.event_id = @oldEventId AND er.contestant_id = @oldContestantId
+            AND COALESCE(TRIM(er.event_name), '') = COALESCE(@origEventName, '')
+            AND COALESCE(TRIM(er.event_age_group), '') = COALESCE(@origEventAgeGroup, '')
+            AND COALESCE(TRIM(er.contestant_first_name), '') = COALESCE(@origFirstName, '')
+            AND COALESCE(TRIM(er.contestant_last_name), '') = COALESCE(@origLastName, '')
+            AND COALESCE(TRIM(er.contestant_mission), '') = COALESCE(@origMission, '')
+            AND COALESCE(TRIM(er.chest_no), '') = COALESCE(@origChestNo, '')
+            AND COALESCE(er.comments, '') = COALESCE(@origComments, '')
+            AND e.event_id = @newEventId AND c.id = @newContestantId
+            AND (LOWER(TRIM(e.individual_group)) <> 'individual'
+              OR LOWER(TRIM(e.event_age_group)) = LOWER(TRIM(c.age_group)))
+            AND NULLIF(TRIM(
+              CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
+                WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no END
+            ), '') IS NOT NULL
+          RETURNING er.event_id
+        `, {
+          oldEventId: original.EventID, oldContestantId: original.ContestantID,
+          newEventId: data.EventID, newContestantId: data.ContestantID,
+          comments: data.Comments || null,
+          origEventName: original.EventName || null, origEventAgeGroup: original.EventAgeGroup || null,
+          origFirstName: original.ContestantFirstName || null, origLastName: original.ContestantLastName || null,
+          origMission: original.ContestantMission || null, origChestNo: original.ChestNo || null,
+          origComments: original.Comments || null,
+        });
+        if (!upd.rowCount)
+          throw Object.assign(new Error('[51060] Registration changed or the selected contestant is not eligible. Reload and check the age group and chest number.'), {});
+      });
       res.json({ message: 'Event registration updated.' });
     } catch (error) {
-      if ([51060, 51001, 51004, 2601, 2627, 1205].includes(error.number)) return res.status(409).json({ message: error.number === 51004 ? 'This contestant already has the maximum of three individual registrations.' : [2601, 2627, 51001].includes(error.number) ? 'This contestant is already registered for the selected event.' : error.message });
+      const en = db.errorNumber(error);
+      const ce = db.getCustomError(error);
+      if (en === 51004) return res.status(409).json({ message: 'This contestant already has the maximum of three individual registrations.' });
+      if (en === 23505) return res.status(409).json({ message: 'This contestant is already registered for the selected event.' });
+      if (ce && ce.number === 51060) return res.status(409).json({ message: ce.message });
       console.error('Edit registration:', error);
       res.status(500).json({ message: 'Unable to update the registration.' });
     }

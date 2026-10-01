@@ -4,7 +4,8 @@
   "main": "Server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node --env-file-if-exists=.env Server.js"
+    "start": "node --env-file-if-exists=.env Server.js",
+    "migrate": "liquibase --changeLogFile=liquibase/changelog/db.changelog-master.xml update"
   },
   "keywords": [],
   "author": "",
@@ -15,7 +16,7 @@
     "express": "^5.1.0",
     "express-session": "^1.18.1",
     "loader": "^2.1.1",
-    "mssql": "^11.0.1"
+    "pg": "^8.12.0"
   },
   "description": ""
 }

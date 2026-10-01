@@ -4,7 +4,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const session = require('express-session');
-const sql = require('mssql');
+const db = require('./db');
 const { isResultboard, restrictResultboard } = require('./resultboard-access');
 
 // Also load configuration when Server.js is launched directly from an IDE.
@@ -17,38 +17,9 @@ const app = express();
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000;
 const activeSessions = require('./single-session')(SESSION_TIMEOUT_MS);
 const PORT = Number(process.env.PORT) || 3000;
-const ADMIN_USERNAME = String(process.env.ADMIN_USERNAME || '').trim().toLowerCase();
-const sqlConfig = {
-  server: process.env.DB_SERVER || 'localhost\\SQLEXPRESS',
-  user: process.env.DB_USER || 'Pgrm_User',
-  password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME || 'CSMEGB-Scotland',
-  options: { encrypt: false, trustServerCertificate: true },
-};
 
-if (!sqlConfig.password) {
-  throw new Error('DB_PASSWORD must be set before starting the server.');
-}
-
-const db = new sql.ConnectionPool(sqlConfig);
-const dbReady = db.connect().then(async () => {
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'current-event.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'contestant-created-at.sql'), 'utf8'));
-  await db.request().input('adminUsername', sql.NVarChar(255), ADMIN_USERNAME)
-    .query(fs.readFileSync(path.join(__dirname, 'sql', 'user-roles.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'resultboard-role.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'decimal-result-scores.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'result-score-comments.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'walkover-results.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'results-printed.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'group-contestant-events.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'auto-number-group-contestants.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'limit-group-registrations.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'limit-individual-registrations.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'unique-contestant-chest-numbers.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'prevent-duplicate-contestants.sql'), 'utf8'));
-  await db.request().query(fs.readFileSync(path.join(__dirname, 'sql', 'prevent-duplicate-group-contestants.sql'), 'utf8'));
-});
+// Migrations are managed by Liquibase; run `npm run migrate` before starting the server.
+const dbReady = Promise.resolve();
 
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -100,9 +71,9 @@ function requireAdmin(req, res, next) {
   return res.status(403).json({ message: 'Administrator access is required.' });
 }
 
-require('./admin-contestant-routes')(app, { db, dbReady, sql, requireAdmin });
-require('./admin-event-name-routes')(app, { db, dbReady, sql, requireAdmin });
-require('./delete-user-routes')(app, { db, dbReady, sql, requireAdmin, activeSessions });
+require('./admin-contestant-routes')(app, { db, dbReady, requireAdmin });
+require('./admin-event-name-routes')(app, { db, dbReady, requireAdmin });
+require('./delete-user-routes')(app, { db, dbReady, requireAdmin, activeSessions });
 
 app.post('/login', async (req, res) => {
   const account = String(req.body.username || req.body.email || '').trim();
@@ -112,9 +83,10 @@ app.post('/login', async (req, res) => {
 
   try {
     await dbReady;
-    const result = await db.request()
-      .input('account', sql.NVarChar(255), account)
-      .query('SELECT TOP (1) name, email, password_hash, role FROM dbo.users WHERE email = @account OR name = @account');
+    const result = await db.query(
+      'SELECT name, email, password_hash, role FROM users WHERE email = @account OR name = @account LIMIT 1',
+      { account }
+    );
     const user = result.recordset[0];
     const boardAccount = user && isResultboard({ username: user.name, role: user.role });
     if (!user || (!boardAccount && (!password || !passwordMatches(password, user.password_hash)))) {
@@ -153,7 +125,7 @@ app.post('/login', async (req, res) => {
 });
 
 require('./reset-data-routes')(app, { db, dbReady, requireAdmin, activeSessions });
-require('./password-reset-routes')(app, { db, dbReady, sql, requireAdmin, hashPassword, activeSessions });
+require('./password-reset-routes')(app, { db, dbReady, requireAdmin, hashPassword, activeSessions });
 
 app.get('/api/admin/sessions', requireAdmin, (req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -184,7 +156,7 @@ app.get('/api/current-event', async (req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
     await dbReady;
-    const result = await db.request().query('SELECT CurrentEventName FROM dbo.CurrentEvent WHERE ID = 1;');
+    const result = await db.query('SELECT current_event_name AS "CurrentEventName" FROM current_event WHERE id = 1');
     if (!result.recordset.length) return res.status(404).json({ message: 'Current event is not configured.' });
     return res.json({ currentEventName: result.recordset[0].CurrentEventName });
   } catch (error) {
@@ -201,9 +173,10 @@ app.put('/api/current-event', requireAdmin, async (req, res) => {
   }
   try {
     await dbReady;
-    const result = await db.request()
-      .input('currentEventName', sql.NVarChar(200), currentEventName)
-      .query('UPDATE dbo.CurrentEvent SET CurrentEventName = @currentEventName OUTPUT INSERTED.CurrentEventName WHERE ID = 1;');
+    const result = await db.query(
+      'UPDATE current_event SET current_event_name = @currentEventName WHERE id = 1 RETURNING current_event_name AS "CurrentEventName"',
+      { currentEventName }
+    );
     if (!result.recordset.length) return res.status(404).json({ message: 'Current event is not configured.' });
     return res.json({ message: 'Current event name saved.', currentEventName: result.recordset[0].CurrentEventName });
   } catch (error) {
@@ -215,11 +188,7 @@ app.put('/api/current-event', requireAdmin, async (req, res) => {
 app.post('/api/missions', authMiddleware, async (req, res) => {
   try {
     await dbReady;
-    const result = await db.request().query(`
-      SELECT MissionName AS name, Region AS region
-      FROM dbo.MissionDetails
-      ORDER BY MissionName;
-    `);
+    const result = await db.query('SELECT mission_name AS name, region FROM missions ORDER BY mission_name');
     return res.json({ missions: result.recordset });
   } catch (error) {
     console.error('List-missions database error:', error);
@@ -230,11 +199,9 @@ app.post('/api/missions', authMiddleware, async (req, res) => {
 app.post('/api/age-categories', authMiddleware, async (req, res) => {
   try {
     await dbReady;
-    const result = await db.request().query(`
-      SELECT AgeRange AS name
-      FROM dbo.AgeCategory
-      ORDER BY ${ageCategoryOrder('AgeRange')}, AgeRange, AGID;
-    `);
+    const result = await db.query(
+      `SELECT age_range AS name FROM age_categories ORDER BY ${ageCategoryOrder('age_range')}, age_range, agid`
+    );
     return res.json({ ageCategories: result.recordset });
   } catch (error) {
     console.error('List-age-categories database error:', error);
@@ -257,15 +224,12 @@ app.post('/api/users', requireAdmin, async (req, res) => {
 
   try {
     await dbReady;
-    const existing = await db.request().input('email', sql.NVarChar(255), email)
-      .query('SELECT TOP (1) email FROM dbo.users WHERE email = @email');
+    const existing = await db.query('SELECT email FROM users WHERE email = @email LIMIT 1', { email });
     if (existing.recordset.length) return res.status(409).json({ message: 'A user with that email already exists.' });
-    await db.request()
-      .input('name', sql.NVarChar(255), name)
-      .input('email', sql.NVarChar(255), email)
-      .input('passwordHash', sql.NVarChar(255), hashPassword(password))
-      .input('role', sql.VarChar(20), role)
-      .query('INSERT INTO dbo.users (name, email, password_hash, role) VALUES (@name, @email, @passwordHash, @role)');
+    await db.query(
+      'INSERT INTO users (name, email, password_hash, role) VALUES (@name, @email, @passwordHash, @role)',
+      { name, email, passwordHash: hashPassword(password), role }
+    );
     return res.status(201).json({ message: 'User created.' });
   } catch (error) {
     console.error('Create-user database error:', error);
@@ -276,10 +240,13 @@ app.post('/api/users', requireAdmin, async (req, res) => {
 app.get('/api/contestants', authMiddleware, async (req, res) => {
   try {
     await dbReady;
-    const result = await db.request().query(`SELECT ID AS ContestantID,
-      [First Name] AS FirstName, [Last Name] AS LastName, AgeGroup, Mission, Region,
-      RTRIM(OnStageChestNo) AS OnStageChestNo, RTRIM(OffStageChestNo) AS OffStageChestNo,
-      Comments FROM dbo.Contestants ORDER BY [First Name], [Last Name], ID;`);
+    const result = await db.query(`
+      SELECT id AS "ContestantID", first_name AS "FirstName", last_name AS "LastName",
+        age_group AS "AgeGroup", mission AS "Mission", region AS "Region",
+        TRIM(on_stage_chest_no) AS "OnStageChestNo", TRIM(off_stage_chest_no) AS "OffStageChestNo",
+        comments AS "Comments"
+      FROM contestants ORDER BY first_name, last_name, id
+    `);
     return res.json({ contestants: result.recordset });
   } catch (error) {
     console.error('List-contestants database error:', error);
@@ -292,11 +259,13 @@ app.get('/api/contestants/:id', authMiddleware, async (req, res) => {
   if (!id || id.length > 50) return res.status(400).json({ message: 'Select a valid contestant ID.' });
   try {
     await dbReady;
-    const result = await db.request().input('id', sql.NVarChar(50), id).query(`SELECT
-      ID AS ContestantID, [First Name] AS FirstName, [Last Name] AS LastName,
-      AgeGroup, Mission, Region, RTRIM(OnStageChestNo) AS OnStageChestNo,
-      RTRIM(OffStageChestNo) AS OffStageChestNo, Comments
-      FROM dbo.Contestants WHERE ID=@id;`);
+    const result = await db.query(`
+      SELECT id AS "ContestantID", first_name AS "FirstName", last_name AS "LastName",
+        age_group AS "AgeGroup", mission AS "Mission", region AS "Region",
+        TRIM(on_stage_chest_no) AS "OnStageChestNo", TRIM(off_stage_chest_no) AS "OffStageChestNo",
+        comments AS "Comments"
+      FROM contestants WHERE id = @id
+    `, { id });
     if (result.recordset.length !== 1) return res.status(404).json({ message: 'Contestant not found.' });
     return res.json({ contestant: result.recordset[0] });
   } catch (error) {
@@ -307,8 +276,10 @@ app.get('/api/contestants/:id', authMiddleware, async (req, res) => {
 
 app.put('/api/contestants/:id', authMiddleware, async (req, res) => {
   const id = String(req.params.id || '').trim();
-  const fields = ['FirstName', 'LastName', 'AgeGroup', 'Mission', 'Region',
-    'OnStageChestNo', 'OffStageChestNo', 'Comments'];
+  const fields = ['FirstName', 'LastName', 'AgeGroup', 'Mission', 'Region', 'OnStageChestNo', 'OffStageChestNo', 'Comments'];
+  const dbCols = { FirstName: 'first_name', LastName: 'last_name', AgeGroup: 'age_group',
+    Mission: 'mission', Region: 'region', OnStageChestNo: 'on_stage_chest_no',
+    OffStageChestNo: 'off_stage_chest_no', Comments: 'comments' };
   const original = req.body?.Original;
   if (!id || id.length > 50 || !original || typeof original !== 'object')
     return res.status(400).json({ message: 'Reload the contestant before editing.' });
@@ -325,63 +296,97 @@ app.put('/api/contestants/:id', authMiddleware, async (req, res) => {
     if (updated[field].length > limit || previous[field].length > limit)
       return res.status(400).json({ message: `${field} is too long.` });
   }
-  if (['FirstName', 'LastName', 'AgeGroup', 'Mission', 'Region'].some((field) => !updated[field]))
+  if (['FirstName', 'LastName', 'AgeGroup', 'Mission', 'Region'].some(f => !updated[f]))
     return res.status(400).json({ message: 'First name, last name, age range, mission, and region are required.' });
   try {
     await dbReady;
-    const request = db.request().input('id', sql.NVarChar(50), id);
-    const types = { FirstName: sql.VarChar(50), LastName: sql.VarChar(50),
-      AgeGroup: sql.NVarChar(50), Mission: sql.VarChar(50), Region: sql.VarChar(50),
-      OnStageChestNo: sql.NChar(10), OffStageChestNo: sql.NChar(10), Comments: sql.VarChar(50) };
-    for (const field of fields) {
-      request.input(field, types[field], updated[field] || null);
-      request.input(`original${field}`, types[field], previous[field] || null);
-    }
-    await request.query(`SET XACT_ABORT ON; BEGIN TRANSACTION;
-      BEGIN TRY
-        UPDATE dbo.Contestants SET [First Name]=@FirstName, [Last Name]=@LastName,
-          AgeGroup=@AgeGroup, Mission=@Mission, Region=@Region,
-          OnStageChestNo=@OnStageChestNo, OffStageChestNo=@OffStageChestNo,
-          Comments=@Comments
-        WHERE ID=@id AND [First Name]=@originalFirstName
-          AND [Last Name]=@originalLastName AND AgeGroup=@originalAgeGroup
-          AND Mission=@originalMission AND Region=@originalRegion
-          AND ISNULL(RTRIM(OnStageChestNo),'')=ISNULL(@originalOnStageChestNo,'')
-          AND ISNULL(RTRIM(OffStageChestNo),'')=ISNULL(@originalOffStageChestNo,'')
-          AND ISNULL(Comments,'')=ISNULL(@originalComments,'');
-        IF @@ROWCOUNT <> 1
-          THROW 51060, 'Contestant details changed or the ID is missing. Reload before saving.', 1;
-        IF EXISTS (SELECT 1 FROM dbo.EventRegistrations er
-          WHERE er.ContestantID=@id
-            AND NOT EXISTS (SELECT 1 FROM dbo.PrePubResults p
-              WHERE p.EventID=er.EventID AND p.EventAgeGroup=er.EventAgeGroup
-                AND p.CheckedApproved='approved')
-            AND NULLIF(LTRIM(RTRIM(CASE LOWER(REPLACE(REPLACE(RTRIM(er.OnStageOffStage),' ',''),'-',''))
-              WHEN 'onstage' THEN @OnStageChestNo WHEN 'offstage' THEN @OffStageChestNo END)), '') IS NULL)
-          THROW 51061, 'A pending registration needs its stage chest number. Keep that number or resolve the registration.', 1;
-        UPDATE er SET ContestantFirstName=@FirstName, ContestantLastName=@LastName,
-          ContestantMission=@Mission,
-          ChestNo=CASE LOWER(REPLACE(REPLACE(RTRIM(er.OnStageOffStage),' ',''),'-',''))
-            WHEN 'onstage' THEN @OnStageChestNo WHEN 'offstage' THEN @OffStageChestNo END
-        FROM dbo.EventRegistrations er WHERE er.ContestantID=@id
-          AND NOT EXISTS (SELECT 1 FROM dbo.PrePubResults p
-            WHERE p.EventID=er.EventID AND p.EventAgeGroup=er.EventAgeGroup
-              AND p.CheckedApproved='approved');
-        UPDATE p SET ContestantFirstName=er.ContestantFirstName,
-          ContestantLastName=er.ContestantLastName,
-          ContestantMission=er.ContestantMission, ChestNo=er.ChestNo
-        FROM dbo.PrePubResults p JOIN dbo.EventRegistrations er
-          ON er.EventID=p.EventID AND er.ContestantID=p.ContestantID
-          AND er.EventAgeGroup=p.EventAgeGroup
-        WHERE p.ContestantID=@id AND p.CheckedApproved='not approved';
-        COMMIT TRANSACTION;
-      END TRY BEGIN CATCH
-        IF @@TRANCOUNT > 0 ROLLBACK TRANSACTION; THROW;
-      END CATCH;`);
+    await db.withTransaction(async (tq) => {
+      // Optimistic concurrency: only update if all original values still match
+      const upd = await tq(`
+        UPDATE contestants SET
+          first_name = @firstName, last_name = @lastName, age_group = @ageGroup,
+          mission = @mission, region = @region,
+          on_stage_chest_no = @onStageChestNo, off_stage_chest_no = @offStageChestNo,
+          comments = @comments
+        WHERE id = @id
+          AND first_name = @origFirstName AND last_name = @origLastName
+          AND age_group = @origAgeGroup AND mission = @origMission AND region = @origRegion
+          AND COALESCE(TRIM(on_stage_chest_no), '') = COALESCE(@origOnStageChestNo, '')
+          AND COALESCE(TRIM(off_stage_chest_no), '') = COALESCE(@origOffStageChestNo, '')
+          AND COALESCE(comments, '') = COALESCE(@origComments, '')
+        RETURNING id
+      `, {
+        id,
+        firstName: updated.FirstName, lastName: updated.LastName, ageGroup: updated.AgeGroup,
+        mission: updated.Mission, region: updated.Region,
+        onStageChestNo: updated.OnStageChestNo || null, offStageChestNo: updated.OffStageChestNo || null,
+        comments: updated.Comments || null,
+        origFirstName: previous.FirstName, origLastName: previous.LastName, origAgeGroup: previous.AgeGroup,
+        origMission: previous.Mission, origRegion: previous.Region,
+        origOnStageChestNo: previous.OnStageChestNo || null, origOffStageChestNo: previous.OffStageChestNo || null,
+        origComments: previous.Comments || null,
+      });
+      if (!upd.rowCount) {
+        const exists = await tq('SELECT 1 FROM contestants WHERE id = @id', { id });
+        if (!exists.recordset.length) throw Object.assign(new Error('[51060] Contestant not found.'), {});
+        throw Object.assign(new Error('[51060] Contestant details changed or the ID is missing. Reload before saving.'), {});
+      }
+
+      // Validate chest numbers still cover pending registrations
+      const missing = await tq(`
+        SELECT 1 FROM event_registrations er
+        WHERE er.contestant_id = @id
+          AND NOT EXISTS (
+            SELECT 1 FROM prepub_results p
+            WHERE p.event_id = er.event_id AND p.event_age_group = er.event_age_group
+              AND p.checked_approved = 'approved'
+          )
+          AND NULLIF(TRIM(
+            CASE LOWER(REPLACE(REPLACE(TRIM(er.on_stage_off_stage), ' ', ''), '-', ''))
+              WHEN 'onstage' THEN @onStageChestNo WHEN 'offstage' THEN @offStageChestNo
+            END
+          ), '') IS NULL
+        LIMIT 1
+      `, { id, onStageChestNo: updated.OnStageChestNo || null, offStageChestNo: updated.OffStageChestNo || null });
+      if (missing.recordset.length)
+        throw Object.assign(new Error('[51061] A pending registration needs its stage chest number. Keep that number or resolve the registration.'), {});
+
+      // Cascade name/mission/chest updates to unresolved registrations
+      await tq(`
+        UPDATE event_registrations SET
+          contestant_first_name = @firstName, contestant_last_name = @lastName,
+          contestant_mission = @mission,
+          chest_no = CASE LOWER(REPLACE(REPLACE(TRIM(on_stage_off_stage), ' ', ''), '-', ''))
+            WHEN 'onstage' THEN @onStageChestNo WHEN 'offstage' THEN @offStageChestNo END
+        WHERE contestant_id = @id
+          AND NOT EXISTS (
+            SELECT 1 FROM prepub_results p
+            WHERE p.event_id = event_registrations.event_id
+              AND p.event_age_group = event_registrations.event_age_group
+              AND p.checked_approved = 'approved'
+          )
+      `, { id, firstName: updated.FirstName, lastName: updated.LastName, mission: updated.Mission,
+           onStageChestNo: updated.OnStageChestNo || null, offStageChestNo: updated.OffStageChestNo || null });
+
+      // Sync pre-publication result snapshot for unapproved rows
+      await tq(`
+        UPDATE prepub_results pr SET
+          contestant_first_name = er.contestant_first_name,
+          contestant_last_name = er.contestant_last_name,
+          contestant_mission = er.contestant_mission,
+          chest_no = er.chest_no
+        FROM event_registrations er
+        WHERE er.event_id = pr.event_id AND er.contestant_id = pr.contestant_id
+          AND er.event_age_group = pr.event_age_group
+          AND pr.contestant_id = @id AND pr.checked_approved = 'not approved'
+      `, { id });
+    });
     return res.json({ message: 'Contestant details saved.' });
   } catch (error) {
-    if ([51060, 51061, 51062, 51002, 2601, 2627, 1205].includes(error.number))
-      return res.status(409).json({ message: error.message });
+    const en = db.errorNumber(error);
+    if ([51060, 51061, 51062].includes(en))
+      return res.status(409).json({ message: db.getCustomError(error)?.message || error.message });
+    if (en === 23505) return res.status(409).json({ message: error.message });
     console.error('Edit-contestant database error:', error);
     return res.status(500).json({ message: 'Unable to save contestant details.' });
   }
@@ -398,42 +403,49 @@ app.post('/api/contestants', authMiddleware, async (req, res) => {
     offStageChestNo: String(req.body.offStageChestNo || '').trim() || null,
     comments: String(req.body.comments || '').trim() || null,
   };
-
   const requiredValues = [contestant.firstName, contestant.lastName, contestant.ageGroup, contestant.mission, contestant.region];
   if (req.body.isGroupContestant !== true && !contestant.onStageChestNo && !contestant.offStageChestNo) {
     return res.status(400).json({ message: 'Enter at least one on-stage or off-stage chest number when Group contestant is not selected.' });
   }
-  if (requiredValues.some((value) => !value)) {
+  if (requiredValues.some(v => !v)) {
     return res.status(400).json({ message: 'First name, last name, age group, mission, and region are required.' });
   }
-  if (contestant.firstName.length > 50 || contestant.lastName.length > 50 || contestant.ageGroup.length > 50 || contestant.mission.length > 50 || contestant.region.length > 50 || (contestant.onStageChestNo && contestant.onStageChestNo.length > 10) || (contestant.offStageChestNo && contestant.offStageChestNo.length > 10) || (contestant.comments && contestant.comments.length > 50)) {
+  if (contestant.firstName.length > 50 || contestant.lastName.length > 50 || contestant.ageGroup.length > 50
+    || contestant.mission.length > 50 || contestant.region.length > 50
+    || (contestant.onStageChestNo && contestant.onStageChestNo.length > 10)
+    || (contestant.offStageChestNo && contestant.offStageChestNo.length > 10)
+    || (contestant.comments && contestant.comments.length > 50)) {
     return res.status(400).json({ message: 'One or more fields exceed the database column length.' });
   }
-
   try {
     await dbReady;
-    const result = await db.request()
-      .input('firstName', sql.VarChar(50), contestant.firstName)
-      .input('lastName', sql.VarChar(50), contestant.lastName)
-      .input('ageGroup', sql.NVarChar(50), contestant.ageGroup)
-      .input('mission', sql.VarChar(50), contestant.mission)
-      .input('region', sql.VarChar(50), contestant.region)
-      .input('onStageChestNo', sql.NChar(10), contestant.onStageChestNo)
-      .input('offStageChestNo', sql.NChar(10), contestant.offStageChestNo)
-      .input('comments', sql.VarChar(50), contestant.comments)
-      .query(`DECLARE @saved TABLE (ID nvarchar(50), CreatedAt datetime2(3));
-        INSERT INTO dbo.Contestants
-        ([First Name], [Last Name], [AgeGroup], [Mission], [Region], [OnStageChestNo], [OffStageChestNo], [Comments])
-        OUTPUT INSERTED.ID, INSERTED.CreatedAt INTO @saved (ID, CreatedAt)
-        VALUES (@firstName, @lastName, @ageGroup, @mission, @region, @onStageChestNo, @offStageChestNo, @comments);
-        SELECT ID AS id, CONVERT(varchar(23), CreatedAt, 126) + 'Z' AS createdAt FROM @saved;`);
+    const result = await db.withTransaction(async (tq) => {
+      const seqRow = await tq("SELECT nextval('contestant_id_seq') AS seq");
+      const newId = 'C' + seqRow.recordset[0].seq;
+      await tq("INSERT INTO participants (id, participant_type) VALUES (@id, 'individual')", { id: newId });
+      return tq(`
+        INSERT INTO contestants (id, first_name, last_name, age_group, mission, region,
+          on_stage_chest_no, off_stage_chest_no, comments)
+        VALUES (@id, @firstName, @lastName, @ageGroup, @mission, @region,
+          @onStageChestNo, @offStageChestNo, @comments)
+        RETURNING id, TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt"
+      `, {
+        id: newId,
+        firstName: contestant.firstName, lastName: contestant.lastName, ageGroup: contestant.ageGroup,
+        mission: contestant.mission, region: contestant.region,
+        onStageChestNo: contestant.onStageChestNo, offStageChestNo: contestant.offStageChestNo,
+        comments: contestant.comments,
+      });
+    });
     const { id, createdAt } = result.recordset[0];
     return res.status(201).json({ message: `Contestant saved. ID: ${id}.`, id, createdAt });
   } catch (error) {
-    if (error.number === 51062) {
-      return res.status(409).json({ message: error.message });
-    }
-    if ([2601, 2627, 51002].includes(error.number)) {
+    const en = db.errorNumber(error);
+    if (en === 23505) {
+      if (error.constraint === 'uq_contestants_on_stage_chest')
+        return res.status(409).json({ message: 'On-stage chest number already belongs to another contestant. Enter a unique on-stage chest number.' });
+      if (error.constraint === 'uq_contestants_off_stage_chest')
+        return res.status(409).json({ message: 'Off-stage chest number already belongs to another contestant. Enter a unique off-stage chest number.' });
       return res.status(409).json({ message: 'A contestant with the same first name, last name, age group, and mission already exists. Check the existing record before adding another contestant.' });
     }
     console.error('Create-contestant database error:', error);
@@ -441,12 +453,16 @@ app.post('/api/contestants', authMiddleware, async (req, res) => {
   }
 });
 
-const eventColumns = 'EventID, EventName, EventAgeGroup, RTRIM(IndividualGroup) AS IndividualGroup, RTRIM(OnStageOffStage) AS OnStageOffStage, Comments';
+const eventSelectCols = `event_id AS "EventID", event_name AS "EventName",
+  event_age_group AS "EventAgeGroup", TRIM(individual_group) AS "IndividualGroup",
+  TRIM(on_stage_off_stage) AS "OnStageOffStage", comments AS "Comments"`;
 
 app.get('/api/events', authMiddleware, async (req, res) => {
   try {
     await dbReady;
-    const result = await db.request().query(`SELECT ${eventColumns} FROM dbo.Events ORDER BY EventName, ${ageCategoryOrder('EventAgeGroup')}, EventAgeGroup, EventID;`);
+    const result = await db.query(
+      `SELECT ${eventSelectCols} FROM events ORDER BY event_name, ${ageCategoryOrder('event_age_group')}, event_age_group, event_id`
+    );
     return res.json({ events: result.recordset });
   } catch (error) {
     console.error('List-events database error:', error);
@@ -459,8 +475,7 @@ app.get('/api/events/:id', authMiddleware, async (req, res) => {
   if (!id || id.length > 50) return res.status(400).json({ message: 'Select a valid event ID.' });
   try {
     await dbReady;
-    const result = await db.request().input('id', sql.NVarChar(50), id)
-      .query(`SELECT ${eventColumns} FROM dbo.Events WHERE EventID=@id;`);
+    const result = await db.query(`SELECT ${eventSelectCols} FROM events WHERE event_id = @id`, { id });
     if (result.recordset.length !== 1) return res.status(404).json({ message: 'Event not found.' });
     return res.json({ event: result.recordset[0] });
   } catch (error) {
@@ -488,35 +503,42 @@ app.put('/api/events/:id', authMiddleware, async (req, res) => {
     return res.status(400).json({ message: 'Select a valid event type and stage.' });
   try {
     await dbReady;
-    const request = db.request().input('id', sql.NVarChar(50), id);
-    for (const field of Object.keys(limits)) {
-      const type = field === 'EventAgeGroup' ? sql.NVarChar(50) : sql.VarChar(limits[field]);
-      request.input(field, type, data[field] || null);
-      request.input(`original${field}`, type, String(original[field] || '').trim() || null);
-    }
-    await request.query(`SET XACT_ABORT ON; BEGIN TRANSACTION;
-      BEGIN TRY
-        IF EXISTS (SELECT 1 FROM dbo.EventRegistrations WITH (UPDLOCK, HOLDLOCK) WHERE EventID=@id)
-          AND (@EventName<>@originalEventName OR @EventAgeGroup<>@originalEventAgeGroup
-            OR @IndividualGroup<>@originalIndividualGroup OR @OnStageOffStage<>@originalOnStageOffStage)
-          THROW 51061, 'This event has registrations. Only comments can be changed.', 1;
-        UPDATE dbo.Events SET EventName=@EventName, EventAgeGroup=@EventAgeGroup,
-          IndividualGroup=@IndividualGroup, OnStageOffStage=@OnStageOffStage, Comments=@Comments
-        WHERE EventID=@id AND EventName=@originalEventName AND EventAgeGroup=@originalEventAgeGroup
-          AND IndividualGroup=@originalIndividualGroup AND OnStageOffStage=@originalOnStageOffStage
-          AND ISNULL(Comments,'')=ISNULL(@originalComments,'');
-        IF @@ROWCOUNT<>1 THROW 51060, 'Event details changed or the ID is missing. Reload before saving.', 1;
-        COMMIT TRANSACTION;
-      END TRY
-      BEGIN CATCH
-        IF @@TRANCOUNT>0 ROLLBACK TRANSACTION;
-        THROW;
-      END CATCH;`);
+    await db.withTransaction(async (tq) => {
+      // Block changes to structural fields if registrations exist
+      const hasReg = await tq('SELECT 1 FROM event_registrations WHERE event_id = @id LIMIT 1', { id });
+      const orig = original;
+      if (hasReg.recordset.length &&
+          (data.EventName !== orig.EventName || data.EventAgeGroup !== orig.EventAgeGroup ||
+           data.IndividualGroup !== orig.IndividualGroup || data.OnStageOffStage !== orig.OnStageOffStage)) {
+        throw Object.assign(new Error('[51061] This event has registrations. Only comments can be changed.'), {});
+      }
+      const upd = await tq(`
+        UPDATE events SET event_name = @eventName, event_age_group = @eventAgeGroup,
+          individual_group = @individualGroup, on_stage_off_stage = @onStageOffStage,
+          comments = @comments
+        WHERE event_id = @id
+          AND event_name = @origEventName AND event_age_group = @origEventAgeGroup
+          AND individual_group = @origIndividualGroup AND on_stage_off_stage = @origOnStageOffStage
+          AND COALESCE(comments, '') = COALESCE(@origComments, '')
+        RETURNING event_id
+      `, {
+        id,
+        eventName: data.EventName, eventAgeGroup: data.EventAgeGroup,
+        individualGroup: data.IndividualGroup, onStageOffStage: data.OnStageOffStage,
+        comments: data.Comments || null,
+        origEventName: String(orig.EventName || '').trim(), origEventAgeGroup: String(orig.EventAgeGroup || '').trim(),
+        origIndividualGroup: String(orig.IndividualGroup || '').trim(), origOnStageOffStage: String(orig.OnStageOffStage || '').trim(),
+        origComments: String(orig.Comments || '').trim() || null,
+      });
+      if (!upd.rowCount)
+        throw Object.assign(new Error('[51060] Event details changed or the ID is missing. Reload before saving.'), {});
+    });
     return res.json({ message: 'Event details updated.' });
   } catch (error) {
-    if ([51060, 51061].includes(error.number)) return res.status(409).json({ message: error.message });
-    if ([2601, 2627, 51003].includes(error.number))
-      return res.status(409).json({ message: 'An event with these details already exists.' });
+    const en = db.errorNumber(error);
+    const ce = db.getCustomError(error);
+    if (ce && [51060, 51061].includes(ce.number)) return res.status(409).json({ message: ce.message });
+    if (en === 23505) return res.status(409).json({ message: 'An event with these details already exists.' });
     console.error('Update-event database error:', error);
     return res.status(500).json({ message: 'Unable to update the event.' });
   }
@@ -535,22 +557,22 @@ app.post('/api/events', authMiddleware, async (req, res) => {
   }
   try {
     await dbReady;
-    const result = await db.request()
-      .input('EventName', sql.VarChar(50), data.EventName)
-      .input('EventAgeGroup', sql.NVarChar(50), data.EventAgeGroup)
-      .input('IndividualGroup', sql.Char(10), data.IndividualGroup)
-      .input('OnStageOffStage', sql.Char(10), data.OnStageOffStage)
-      .input('Comments', sql.VarChar(50), data.Comments || null)
-      .query(`DECLARE @saved TABLE (EventID nvarchar(50));
-        INSERT INTO dbo.Events
-        ([EventName], [EventAgeGroup], [IndividualGroup], [OnStageOffStage], [Comments])
-        OUTPUT INSERTED.EventID INTO @saved (EventID)
-        VALUES (@EventName, @EventAgeGroup, @IndividualGroup, @OnStageOffStage, @Comments);
-        SELECT EventID FROM @saved;`);
+    const seqRow = await db.query("SELECT nextval('event_id_seq') AS seq");
+    const newId = 'E' + seqRow.recordset[0].seq;
+    const result = await db.query(`
+      INSERT INTO events (event_id, event_name, event_age_group, individual_group, on_stage_off_stage, comments)
+      VALUES (@eventId, @eventName, @eventAgeGroup, @individualGroup, @onStageOffStage, @comments)
+      RETURNING event_id AS "EventID"
+    `, {
+      eventId: newId,
+      eventName: data.EventName, eventAgeGroup: data.EventAgeGroup,
+      individualGroup: data.IndividualGroup, onStageOffStage: data.OnStageOffStage,
+      comments: data.Comments || null,
+    });
     const eventId = result.recordset[0].EventID;
     return res.status(201).json({ message: `Event saved. ID: ${eventId}.`, EventID: eventId });
   } catch (error) {
-    if ([2601, 2627, 51003].includes(error.number)) {
+    if (db.errorNumber(error) === 23505) {
       return res.status(409).json({ message: 'An event with the same name, age group, individual/group type, and stage already exists.' });
     }
     console.error('Create-event database error:', error);
@@ -561,15 +583,21 @@ app.post('/api/events', authMiddleware, async (req, res) => {
 app.get('/api/event-registration-options', authMiddleware, async (req, res) => {
   try {
     await dbReady;
-    const result = await db.request().query(`
-      SELECT EventID, EventName, EventAgeGroup, IndividualGroup, OnStageOffStage
-      FROM dbo.Events ORDER BY EventName, ${ageCategoryOrder('EventAgeGroup')}, EventAgeGroup, EventID;
-      SELECT ID AS ContestantID, [First Name] AS ContestantFirstName,
-        [Last Name] AS ContestantLastName, Mission AS ContestantMission,
-        OnStageChestNo, OffStageChestNo, AgeGroup
-      FROM dbo.Contestants ORDER BY [First Name], [Last Name], ID;
-    `);
-    return res.json({ events: result.recordsets[0], contestants: result.recordsets[1] });
+    const [eventsResult, contestantsResult] = await Promise.all([
+      db.query(`
+        SELECT event_id AS "EventID", event_name AS "EventName", event_age_group AS "EventAgeGroup",
+          TRIM(individual_group) AS "IndividualGroup", TRIM(on_stage_off_stage) AS "OnStageOffStage"
+        FROM events ORDER BY event_name, ${ageCategoryOrder('event_age_group')}, event_age_group, event_id
+      `),
+      db.query(`
+        SELECT id AS "ContestantID", first_name AS "ContestantFirstName",
+          last_name AS "ContestantLastName", mission AS "ContestantMission",
+          on_stage_chest_no AS "OnStageChestNo", off_stage_chest_no AS "OffStageChestNo",
+          age_group AS "AgeGroup"
+        FROM contestants ORDER BY first_name, last_name, id
+      `),
+    ]);
+    return res.json({ events: eventsResult.recordset, contestants: contestantsResult.recordset });
   } catch (error) {
     console.error('Registration-options database error:', error);
     return res.status(500).json({ message: 'Unable to load events and contestants. Please reload the page.' });
@@ -588,37 +616,39 @@ app.post('/api/event-registrations', authMiddleware, async (req, res) => {
   }
   try {
     await dbReady;
-    // Copy the current source rows in one statement. Never trust posted display fields.
-    const result = await db.request()
-      .input('EventID', sql.NVarChar(50), data.EventID)
-      .input('ContestantID', sql.NVarChar(50), data.ContestantID)
-      .input('Comments', sql.VarChar(50), data.Comments || null)
-      .query(`
-        INSERT INTO dbo.EventRegistrations
-          (EventID, EventName, EventAgeGroup, IndividualGroup, OnStageOffStage,
-           ContestantID, ContestantFirstName, ContestantLastName, ContestantMission, ChestNo, Comments)
-        SELECT e.EventID, e.EventName, e.EventAgeGroup, e.IndividualGroup, e.OnStageOffStage,
-          c.ID, c.[First Name], c.[Last Name], c.Mission, chest.ChestNo, @Comments
-        FROM dbo.Events e CROSS JOIN dbo.Contestants c
-        CROSS APPLY (SELECT CASE LOWER(REPLACE(REPLACE(LTRIM(RTRIM(e.OnStageOffStage)), ' ', ''), '-', ''))
-          WHEN 'onstage' THEN c.OnStageChestNo WHEN 'offstage' THEN c.OffStageChestNo END AS ChestNo) chest
-        WHERE e.EventID = @EventID AND c.ID = @ContestantID
-          AND (SELECT COUNT(*) FROM dbo.Events WHERE EventID = @EventID) = 1
-          AND (SELECT COUNT(*) FROM dbo.Contestants WHERE ID = @ContestantID) = 1
-          AND (LOWER(LTRIM(RTRIM(e.IndividualGroup))) <> 'individual'
-            OR (NULLIF(LTRIM(RTRIM(e.EventAgeGroup)), '') IS NOT NULL
-              AND LOWER(LTRIM(RTRIM(e.EventAgeGroup))) = LOWER(LTRIM(RTRIM(c.AgeGroup)))))
-          AND NULLIF(LTRIM(RTRIM(chest.ChestNo)), '') IS NOT NULL;
-      `);
-    if (result.rowsAffected[0] !== 1) {
+    // Copy from source tables in one statement — never trust posted display fields.
+    const result = await db.query(`
+      INSERT INTO event_registrations
+        (event_id, event_name, event_age_group, individual_group, on_stage_off_stage,
+         contestant_id, contestant_first_name, contestant_last_name, contestant_mission, chest_no, comments)
+      SELECT e.event_id, e.event_name, e.event_age_group, e.individual_group, e.on_stage_off_stage,
+        c.id, c.first_name, c.last_name, c.mission,
+        CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
+          WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no
+        END,
+        @comments
+      FROM events e, contestants c
+      WHERE e.event_id = @eventId AND c.id = @contestantId
+        AND (LOWER(TRIM(e.individual_group)) <> 'individual'
+          OR (TRIM(e.event_age_group) <> ''
+            AND LOWER(TRIM(e.event_age_group)) = LOWER(TRIM(c.age_group))))
+        AND NULLIF(TRIM(
+          CASE LOWER(REPLACE(REPLACE(TRIM(e.on_stage_off_stage), ' ', ''), '-', ''))
+            WHEN 'onstage' THEN c.on_stage_chest_no WHEN 'offstage' THEN c.off_stage_chest_no
+          END
+        ), '') IS NOT NULL
+    `, { eventId: data.EventID, contestantId: data.ContestantID, comments: data.Comments || null });
+
+    if (result.rowCount !== 1) {
       return res.status(400).json({ message: 'Select an existing event and contestant with unique IDs, a valid event stage, and a chest number for that stage. Individual events require the contestant and event to have the same age group. Reload the page if their details have changed.' });
     }
     return res.status(201).json({ message: 'Event registration saved.' });
   } catch (error) {
-    if (error.number === 51004) {
+    const en = db.errorNumber(error);
+    if (en === 51004) {
       return res.status(409).json({ message: 'This contestant already has 3 individual item registrations. On-stage and off-stage items count toward the same limit.' });
     }
-    if ([2601, 2627, 51001].includes(error.number)) {
+    if (en === 23505) {
       return res.status(409).json({ message: 'This contestant is already registered for this event.' });
     }
     console.error('Create-event-registration database error:', error);
@@ -626,10 +656,10 @@ app.post('/api/event-registrations', authMiddleware, async (req, res) => {
   }
 });
 
-require('./group-contestant-routes')(app, { db, dbReady, sql, authMiddleware });
-require('./event-registration-edit-routes')(app, { db, dbReady, sql, authMiddleware });
-require('./results-routes')(app, { db, dbReady, sql, authMiddleware, isAdmin });
-require('./certificate-routes')(app, { db, dbReady, sql, authMiddleware });
+require('./group-contestant-routes')(app, { db, dbReady, authMiddleware });
+require('./event-registration-edit-routes')(app, { db, dbReady, authMiddleware });
+require('./results-routes')(app, { db, dbReady, authMiddleware, isAdmin });
+require('./certificate-routes')(app, { db, dbReady, authMiddleware });
 
 app.post('/logout', (req, res) => {
   const { accountKey, loginToken } = req.session;
@@ -641,9 +671,4 @@ app.post('/logout', (req, res) => {
   });
 });
 
-dbReady.then(() => {
-  app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
-}).catch((error) => {
-  console.error('Unable to connect to SQL Server:', error);
-  process.exit(1);
-});
+app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));

@@ -18,66 +18,73 @@ async function certificateDirectory() {
   return path.join(desktop, 'Certificates');
 }
 
-module.exports = function registerCertificateRoutes(app, { db, dbReady, sql, authMiddleware,
+module.exports = function registerCertificateRoutes(app, { db, dbReady, authMiddleware,
   getCertificateDirectory = certificateDirectory }) {
   app.post('/api/results/certificate', authMiddleware, async (req, res) => {
     const { EventName, EventAgeGroup } = req.body || {};
     if (![EventName, EventAgeGroup].every(value => typeof value === 'string' && value.trim() && value.length <= 50))
       return res.status(400).json({ message: 'Select an event name and age group.' });
-    let transaction;
-    let active = false;
     try {
       await dbReady;
-      transaction = new sql.Transaction(db);
-      transaction.on('rollback', () => { active = false; });
-      await transaction.begin();
-      active = true;
-      const request = () => new sql.Request(transaction)
-        .input('eventName', sql.VarChar(50), EventName.trim())
-        .input('ageGroup', sql.NVarChar(50), EventAgeGroup.trim());
-      const result = await request().query(`SELECT EventID, EventName, EventAgeGroup, IndividualGroup,
-        OnStageOffStage, ContestantID, ContestantFirstName, ContestantLastName, ContestantMission,
-        ChestNo, Score, Place, Points, CertificatePrinted, IsWalkOver
-        FROM dbo.PublishedResults WITH (UPDLOCK, HOLDLOCK)
-        WHERE LTRIM(RTRIM(EventName))=@eventName AND LTRIM(RTRIM(EventAgeGroup))=@ageGroup
-        ORDER BY EventID, CASE RTRIM(Place) WHEN 'First' THEN 1 WHEN 'Second' THEN 2 ELSE 3 END, ContestantID;`);
-      if (!result.recordset.length) {
-        await transaction.rollback(); active = false;
-        return res.status(404).json({ message: 'Published result not found. Refresh the list.' });
-      }
-      const rows = result.recordset;
-      const row = rows[0];
-      if (!rows.some(item => String(item.CertificatePrinted).trim().toLowerCase() === 'no')) {
-        await transaction.rollback(); active = false;
-        return res.status(409).json({ message: 'All certificates in this selection have already been exported or are not available for printing. Refresh the list.' });
-      }
-      const workbook = new ExcelJS.Workbook();
-      const sheet = workbook.addWorksheet('Certificate');
-      sheet.columns = ['Name', 'Place', 'Event', 'ItemCode']
-        .map(key => ({ header: key, key, width: key === 'Place' ? 15 : 35 }));
-      const clean = value => String(value ?? '').trim();
-      rows.forEach(row => sheet.addRow({
-        Name: [clean(row.ContestantFirstName), clean(row.ContestantLastName)].filter(Boolean).join(' '),
-        Place: clean(row.Place),
-        Event: clean(row.EventName),
-        ItemCode: `${clean(row.EventName)} - ${clean(row.EventAgeGroup)}`,
-      }));
-      sheet.getRow(1).font = { bold: true };
-      sheet.views = [{ state: 'frozen', ySplit: 1 }];
-      const buffer = await workbook.xlsx.writeBuffer();
-      const filename = `${row.EventName.trim()} - ${row.EventAgeGroup.trim()}`
-        .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150) + '.xlsx';
-      const directory = await getCertificateDirectory();
-      await fs.mkdir(directory, { recursive: true });
-      const filePath = path.join(directory, filename);
-      await fs.writeFile(filePath, Buffer.from(buffer));
-      await request().query(`UPDATE dbo.PublishedResults SET CertificatePrinted='Yes'
-        WHERE LTRIM(RTRIM(EventName))=@eventName AND LTRIM(RTRIM(EventAgeGroup))=@ageGroup;`);
-      await transaction.commit(); active = false;
+      let filePath, filename;
+      await db.withTransaction(async (tq) => {
+        const result = await tq(`
+          SELECT event_id AS "EventID", event_name AS "EventName", event_age_group AS "EventAgeGroup",
+            individual_group AS "IndividualGroup", on_stage_off_stage AS "OnStageOffStage",
+            contestant_id AS "ContestantID", contestant_first_name AS "ContestantFirstName",
+            contestant_last_name AS "ContestantLastName", contestant_mission AS "ContestantMission",
+            TRIM(chest_no) AS "ChestNo", score AS "Score", place AS "Place",
+            points AS "Points", certificate_printed AS "CertificatePrinted", is_walk_over AS "IsWalkOver"
+          FROM published_results
+          WHERE TRIM(event_name) = @eventName AND TRIM(event_age_group) = @ageGroup
+          ORDER BY event_id,
+            CASE TRIM(place) WHEN 'First' THEN 1 WHEN 'Second' THEN 2 ELSE 3 END,
+            contestant_id
+          FOR UPDATE
+        `, { eventName: EventName.trim(), ageGroup: EventAgeGroup.trim() });
+
+        if (!result.recordset.length)
+          throw Object.assign(new Error('[51404] Published result not found. Refresh the list.'), {});
+
+        const rows = result.recordset;
+        if (!rows.some(item => String(item.CertificatePrinted).trim().toLowerCase() === 'no'))
+          throw Object.assign(new Error('[51409] All certificates in this selection have already been exported or are not available for printing. Refresh the list.'), {});
+
+        const workbook = new ExcelJS.Workbook();
+        const sheet = workbook.addWorksheet('Certificate');
+        sheet.columns = ['Name', 'Place', 'Event', 'ItemCode']
+          .map(key => ({ header: key, key, width: key === 'Place' ? 15 : 35 }));
+        const clean = value => String(value ?? '').trim();
+        rows.forEach(row => sheet.addRow({
+          Name: [clean(row.ContestantFirstName), clean(row.ContestantLastName)].filter(Boolean).join(' '),
+          Place: clean(row.Place),
+          Event: clean(row.EventName),
+          ItemCode: `${clean(row.EventName)} - ${clean(row.EventAgeGroup)}`,
+        }));
+        sheet.getRow(1).font = { bold: true };
+        sheet.views = [{ state: 'frozen', ySplit: 1 }];
+
+        const buffer = await workbook.xlsx.writeBuffer();
+        const row = rows[0];
+        filename = `${row.EventName.trim()} - ${row.EventAgeGroup.trim()}`
+          .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/[. ]+$/g, '').slice(0, 150) + '.xlsx';
+        const directory = await getCertificateDirectory();
+        await fs.mkdir(directory, { recursive: true });
+        filePath = path.join(directory, filename);
+        await fs.writeFile(filePath, Buffer.from(buffer));
+
+        await tq(`
+          UPDATE published_results SET certificate_printed = 'Yes'
+          WHERE TRIM(event_name) = @eventName AND TRIM(event_age_group) = @ageGroup
+        `, { eventName: EventName.trim(), ageGroup: EventAgeGroup.trim() });
+      });
+
       res.set('Cache-Control', 'no-store');
       return res.json({ message: 'Certificate Excel file saved.', filePath, filename });
     } catch (error) {
-      if (active) await transaction.rollback().catch(() => {});
+      const ce = db.getCustomError(error);
+      if (ce?.number === 51404) return res.status(404).json({ message: ce.message });
+      if (ce?.number === 51409) return res.status(409).json({ message: ce.message });
       console.error('Certificate export error:', error);
       return res.status(500).json({ message: 'Unable to export the certificate. Refresh the list before retrying.' });
     }
